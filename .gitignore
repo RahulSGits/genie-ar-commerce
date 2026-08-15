@@ -1,0 +1,59 @@
+# dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# next.js
+.next/
+out/
+build/
+next-env.d.ts
+*.tsbuildinfo
+
+# secrets — never commit
+.env
+.env.local
+.env*.local
+.env.production
+
+# TLS certs generated for local https dev
+certificates/
+
+# supabase local
+supabase/.temp/
+supabase/.branches/
+
+# testing
+coverage/
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+
+# local SQLite database — regenerate with `npm run db:seed`
+data/
+
+# uploads written during local dev
+public/uploads/
+
+# generated demo models — regenerate with `npm run db:models`
+public/models/
+
+# os / editor
+.DS_Store
+Thumbs.db
+*.pem
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# vercel
+.vercel
+.next-build/
+.next-e2e/
