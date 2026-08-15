@@ -94,16 +94,40 @@ export function toJson(value: unknown): string | null {
  * updating its invoice's paid total, or converting a CRM lead into a business
  * with a subscription and an opening invoice.
  */
+let txDepth = 0
+
 export function transaction<T>(fn: () => T): T {
   const db = getDb()
-  db.exec('BEGIN')
+
+  // Re-entrant by savepoint. SQLite rejects a nested BEGIN outright
+  // ("cannot start a transaction within a transaction"), so composing two
+  // transactional repository calls — raising an invoice inside a lead
+  // conversion, say — would throw at runtime rather than nest.
+  //
+  // Depth 0 opens a real transaction; deeper calls open a named savepoint and
+  // roll back only their own work, leaving the outer transaction intact to
+  // succeed or fail on its own terms.
+  const depth = txDepth++
+  const name = `sp_${depth}`
+
+  db.exec(depth === 0 ? 'BEGIN' : `SAVEPOINT ${name}`)
   try {
     const result = fn()
-    db.exec('COMMIT')
+    db.exec(depth === 0 ? 'COMMIT' : `RELEASE ${name}`)
     return result
   } catch (err) {
-    db.exec('ROLLBACK')
+    // ROLLBACK TO leaves the savepoint open, so it is released immediately
+    // afterwards — otherwise the savepoint stack leaks and the outer COMMIT
+    // silently keeps work that was meant to be discarded.
+    if (depth === 0) {
+      db.exec('ROLLBACK')
+    } else {
+      db.exec(`ROLLBACK TO ${name}`)
+      db.exec(`RELEASE ${name}`)
+    }
     throw err
+  } finally {
+    txDepth = depth
   }
 }
 

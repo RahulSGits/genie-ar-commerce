@@ -51,6 +51,17 @@ function daysAgo(n: number): string {
   return d.toISOString().slice(0, 10)
 }
 
+/**
+ * Inclusive start of a "last N days" window.
+ *
+ * `day >= daysAgo(30)` spans THIRTY-ONE calendar days — today plus thirty
+ * before it — so every "last 30 days" figure was silently inflated by an extra
+ * day's traffic, and disagreed with the 30-point chart beside it.
+ */
+function windowStart(days: number): string {
+  return daysAgo(Math.max(0, days - 1))
+}
+
 export type FunnelCounts = Record<ArFunnelEvent, number>
 
 /**
@@ -67,7 +78,7 @@ export function getFunnel(businessId: string, days = 30): FunnelCounts {
         WHERE business_id = ? AND day >= ?
         GROUP BY event_type`,
     )
-    .all(businessId, daysAgo(days)) as Row[]
+    .all(businessId, windowStart(days)) as Row[]
 
   const counts = Object.fromEntries(AR_FUNNEL_EVENTS.map((e) => [e, 0])) as FunnelCounts
   for (const row of rows) {
@@ -91,7 +102,7 @@ export function getDailySeries(businessId: string, days = 30): DailyPoint[] {
         WHERE business_id = ? AND day >= ?
         GROUP BY day`,
     )
-    .all(businessId, daysAgo(days - 1)) as Row[]
+    .all(businessId, windowStart(days)) as Row[]
 
   const byDay = new Map(rows.map((r) => [str(r, 'day'), r]))
   const out: DailyPoint[] = []
@@ -118,13 +129,13 @@ export function getTopProducts(businessId: string, days = 30, limit = 5): TopPro
               SUM(CASE WHEN e.event_type = 'product_loaded' THEN 1 ELSE 0 END) AS views,
               SUM(CASE WHEN e.event_type = 'ar_session_started' THEN 1 ELSE 0 END) AS ar_sessions
          FROM analytics_events e
-         JOIN products p ON p.id = e.product_id
+         JOIN products p ON p.id = e.product_id AND p.deleted_at IS NULL
         WHERE e.business_id = ? AND e.day >= ? AND e.product_id IS NOT NULL
         GROUP BY e.product_id
         ORDER BY views DESC
         LIMIT ?`,
     )
-    .all(businessId, daysAgo(days), limit) as Row[]
+    .all(businessId, windowStart(days), limit) as Row[]
 
   return rows.map((r) => ({
     productId: str(r, 'product_id'),
@@ -145,7 +156,7 @@ export function getDeviceBreakdown(businessId: string, days = 30): DeviceBreakdo
         GROUP BY label
         ORDER BY c DESC`,
     )
-    .all(businessId, daysAgo(days)) as Row[]
+    .all(businessId, windowStart(days)) as Row[]
   return rows.map((r) => ({ label: str(r, 'label'), count: num(r, 'c') }))
 }
 
@@ -161,7 +172,7 @@ export type BusinessStats = {
 
 export function getBusinessStats(businessId: string, days = 30): BusinessStats {
   const db = getDb()
-  const since = daysAgo(days)
+  const since = windowStart(days)
   const one = (sql: string, ...p: SqlParam[]) => num(db.prepare(sql).get(...p) as Row, 'c')
 
   const totalScans = one(

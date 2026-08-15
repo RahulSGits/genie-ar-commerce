@@ -5,7 +5,8 @@ import {
 } from 'lucide-react'
 import { requireSuperAdmin } from '@/lib/auth/guards'
 import { getPlatformStats } from '@/lib/db/repositories/analytics'
-import { getBillingSummary, getMonthlyRevenue, markOverdueInvoices } from '@/lib/db/repositories/billing'
+import { getBillingSummary, getMonthlyRevenue } from '@/lib/db/repositories/billing'
+import { maybeRunBillingTick } from '@/lib/billing/engine'
 import { getPipelineSummary, listTasks } from '@/lib/db/repositories/crm'
 import { completeTaskAction } from '@/lib/actions/admin'
 import { CRM_STAGES, CRM_STAGE_LABELS } from '@/types/domain'
@@ -22,8 +23,10 @@ export const dynamic = 'force-dynamic'
 export default async function AdminOverview() {
   await requireSuperAdmin()
 
-  // Lazy sweep: with no cron worker, statuses are brought up to date on read.
-  markOverdueInvoices()
+  // The floor beneath the scheduled trigger: an admin opening this page is
+  // enough to keep billing current even with no cron configured at all.
+  // Rate-limited internally and safe to call on every render.
+  maybeRunBillingTick()
 
   const stats = getPlatformStats()
   const billing = getBillingSummary()

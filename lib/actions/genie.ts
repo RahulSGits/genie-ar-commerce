@@ -6,10 +6,13 @@ import { writeFile, mkdir } from 'node:fs/promises'
 import path from 'node:path'
 import { z } from 'zod'
 import { requireBusiness } from '@/lib/auth/guards'
-import { createProduct, productSlugAvailable, updateProduct, createModel } from '@/lib/db/repositories/catalog'
+import {
+  createProduct, productSlugAvailable, updateProduct, createModel, getProduct,
+} from '@/lib/db/repositories/catalog'
 import {
   createProductImage, attachImagesToProduct, createJob, updateJob, failJob, getJob,
-  createCollection, setCollectionProducts, updateCollection, deleteCollection,
+  listProductImages, createCollection, setCollectionProducts, updateCollection,
+  deleteCollection,
 } from '@/lib/db/repositories/generation'
 import { getEntitlements, getUsage } from '@/lib/db/repositories/businesses'
 import { canCreateProduct, canUploadBytes } from '@/lib/billing/entitlements'
@@ -19,6 +22,7 @@ import { getProvider, generationAvailable, GenerationUnavailableError } from '@/
 import { slugify } from '@/lib/utils'
 import { guarded, type ActionResult } from '@/lib/auth/errors'
 import { PLACEMENT_MODES } from '@/config/terminology'
+import { horizontalRadiusM } from '@/types/ar'
 
 /**
  * GENIE creation flow: upload images → product details → generate 3D.
@@ -72,12 +76,16 @@ export async function uploadImagesAction(
       const check = validateImageUpload(bytes, file.size)
       if (!check.ok) throw new Error(`“${file.name}”: ${check.error}`)
 
-      const id = crypto.randomUUID()
-      const name = safeStorageName(file.name, id)
+      // Two different ids were in play here: one for the filename and one
+      // generated inside createProductImage for the row. Returning the filename
+      // id meant the wizard later asked to attach ids that did not exist, so no
+      // image was ever linked to the product and generation had nothing to work
+      // from. The row id is the one that must travel.
+      const name = safeStorageName(file.name, crypto.randomUUID())
       await writeFile(path.join(dir, name), bytes)
 
       const url = `/uploads/${ctx.businessId}/images/${name}`
-      createProductImage({
+      const imageId = createProductImage({
         businessId: ctx.businessId,
         url,
         bytes: file.size,
@@ -85,7 +93,7 @@ export async function uploadImagesAction(
         role: index === 0 ? 'primary' : 'angle',
         sortOrder: index,
       })
-      saved.push({ id, url, bytes: file.size })
+      saved.push({ id: imageId, url, bytes: file.size })
     }
 
     return saved
@@ -180,18 +188,51 @@ export async function startGenerationAction(
       throw new GenerationUnavailableError(availability.reason ?? 'AI generation is unavailable.')
     }
 
+    const product = getProduct(ctx.businessId, productId)
+    if (!product) throw new Error('That product no longer exists.')
+
+    const images = listProductImages(ctx.businessId, productId)
+    if (images.length === 0) {
+      throw new Error(
+        'Add at least one product image before generating. Generation reconstructs geometry from photographs — it has nothing to work from otherwise.',
+      )
+    }
+
+    // Providers fetch the images themselves, so they need ABSOLUTE URLs. Stored
+    // paths are relative, and passing those through produced a request the
+    // provider could not resolve.
+    const origin = (process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000').replace(/\/$/, '')
+    const imageUrls = images.map((img) =>
+      img.url.startsWith('http') ? img.url : `${origin}${img.url}`,
+    )
+
+    // Real-world size is a genuine quality input: a provider told the object is
+    // 12 cm across reconstructs differently from one guessing.
+    const targetSizeM = horizontalRadiusM(
+      product.dimWidth && product.dimDepth
+        ? {
+            width: product.dimWidth,
+            height: product.dimHeight ?? product.dimWidth,
+            depth: product.dimDepth,
+            unit: product.dimUnit,
+          }
+        : null,
+    )
+
     const provider = getProvider()
     const jobId = createJob({
       businessId: ctx.businessId,
       productId,
       provider: provider.id,
-      imageIds: [],
+      imageIds: images.map((i) => i.id),
     })
 
     try {
       const { providerJobId } = await provider.start({
-        imageUrls: [],
-        productName: '',
+        imageUrls,
+        productName: product.name,
+        category: product.placement,
+        targetSizeM: targetSizeM === null ? null : targetSizeM * 2,
       })
       updateJob(ctx.businessId, jobId, {
         providerJobId,
@@ -254,7 +295,11 @@ export async function pollGenerationAction(jobId: string): Promise<
       // The provider produced an asset: register it and attach it to the product.
       const modelId = createModel({
         businessId: ctx.businessId,
-        name: job.productName ?? 'Generated model',
+        // The name is where the placeholder disclosure becomes permanent — it
+        // shows in the model library, the product form and every picker.
+        name: progress.result.isPlaceholder
+          ? `${job.productName ?? 'Model'} (development placeholder — not AI generated)`
+          : (job.productName ?? 'Generated model'),
         glbUrl: progress.result.glbUrl,
         usdzUrl: progress.result.usdzUrl ?? null,
         posterUrl: progress.result.posterUrl ?? null,

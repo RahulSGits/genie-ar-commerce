@@ -4,6 +4,7 @@ import {
   getDb, now, uuid, str, strOrNull, num, numOrNull, param, transaction,
   type Row, type SqlParam,
 } from '@/lib/db'
+import { getTaxSettings } from '@/lib/db/repositories/platform'
 import type { CurrencyCode } from '@/utils/money'
 import type {
   Coupon, Invoice, InvoiceItem, InvoiceStatus, InvoiceItemKind, Payment, PaymentMethod,
@@ -161,22 +162,28 @@ export function getBillingSummary(businessId?: string): BillingSummary {
   const db = getDb()
   const scope = businessId ? 'AND business_id = ?' : ''
   const args: SqlParam[] = businessId ? [businessId] : []
-  const today = now().slice(0, 10)
+  // Full ISO timestamp, matching lib/billing/engine.ts exactly. The two used
+  // different granularities and disagreed by up to a day about what 'overdue'
+  // means, so a dashboard tile could contradict the invoice badge beside it.
+  const asOf = now()
 
   const row = db
     .prepare(
       `SELECT
          COALESCE(SUM(total_minor), 0) AS billed,
          COALESCE(SUM(paid_minor), 0) AS paid,
+         -- MAX(..., 0) on every balance: an overpaid invoice has a negative
+         -- remainder, which would otherwise subtract from the total and
+         -- under-report what other clients still owe.
          COALESCE(SUM(CASE WHEN status IN ('sent','partial','overdue')
-                           THEN total_minor - paid_minor ELSE 0 END), 0) AS outstanding,
-         COALESCE(SUM(CASE WHEN status IN ('sent','partial','overdue') AND date(due_date) < date(?)
-                           THEN total_minor - paid_minor ELSE 0 END), 0) AS overdue,
+                           THEN MAX(total_minor - paid_minor, 0) ELSE 0 END), 0) AS outstanding,
+         COALESCE(SUM(CASE WHEN status IN ('sent','partial','overdue') AND due_date < ?
+                           THEN MAX(total_minor - paid_minor, 0) ELSE 0 END), 0) AS overdue,
          COUNT(*) AS c
        FROM invoices
       WHERE deleted_at IS NULL AND status != 'cancelled' ${scope}`,
     )
-    .get(today, ...args) as Row
+    .get(asOf, ...args) as Row
 
   return {
     totalBilledMinor: num(row, 'billed'),
@@ -215,15 +222,27 @@ export function getMonthlyRevenue(months = 12): Array<{ month: string; amountMin
     .prepare(
       `SELECT substr(paid_at, 1, 7) AS month, COALESCE(SUM(amount_minor), 0) AS amount
          FROM payments
-        GROUP BY month
-        ORDER BY month DESC
-        LIMIT ?`,
+        GROUP BY month`,
     )
-    .all(months) as Row[]
+    .all() as Row[]
 
-  return rows
-    .map((r) => ({ month: str(r, 'month'), amountMinor: num(r, 'amount') }))
-    .reverse()
+  const byMonth = new Map(rows.map((r) => [str(r, 'month'), num(r, 'amount')]))
+
+  // Dense series ending on the current month. Grouping alone returns only the
+  // months that contain payments, so a month with no revenue silently vanished
+  // and the chart drew a straight line between the two either side of it —
+  // making a bad month look like a normal one.
+  const out: Array<{ month: string; amountMinor: number }> = []
+  const cursor = new Date()
+  cursor.setUTCDate(1)
+
+  for (let i = months - 1; i >= 0; i--) {
+    const d = new Date(cursor)
+    d.setUTCMonth(d.getUTCMonth() - i)
+    const key = d.toISOString().slice(0, 7)
+    out.push({ month: key, amountMinor: byMonth.get(key) ?? 0 })
+  }
+  return out
 }
 
 /* ── writes ─────────────────────────────────────────────────────────────── */
@@ -243,12 +262,21 @@ export type CreateInvoiceInput = {
 }
 
 function nextInvoiceNumber(prefix: string): string {
+  // MAX over the numeric suffix, not ORDER BY number DESC. `number` is TEXT, so
+  // a lexicographic sort puts "INV-2026-9999" above "INV-2026-10000" — the
+  // sequence would stick at 10000 forever and every subsequent invoice would
+  // collide on the UNIQUE index. Casting the suffix sorts by value instead.
   const row = getDb()
-    .prepare(`SELECT number FROM invoices WHERE number LIKE ? ORDER BY number DESC LIMIT 1`)
-    .get(`${prefix}%`) as Row | undefined
+    .prepare(
+      `SELECT COALESCE(MAX(CAST(substr(number, ?) AS INTEGER)), 0) AS n
+         FROM invoices WHERE number LIKE ?`,
+    )
+    .get(prefix.length + 1, `${prefix}%`) as Row | undefined
 
-  const last = row ? Number(str(row, 'number').slice(prefix.length)) : 0
-  return `${prefix}${String((Number.isFinite(last) ? last : 0) + 1).padStart(4, '0')}`
+  const next = num(row ?? {}, 'n') + 1
+  // padStart keeps early numbers aligned but never truncates: past 9999 the
+  // number simply grows a digit.
+  return `${prefix}${String(next).padStart(4, '0')}`
 }
 
 /**
@@ -277,8 +305,23 @@ export function createInvoice(input: CreateInvoiceInput): string {
     })
 
     const subtotal = lines.reduce((s, l) => s + l.amountMinor, 0)
-    const discount = Math.min(input.discountMinor ?? 0, subtotal)
-    const taxPercent = input.taxPercent ?? 0
+    // Clamped at BOTH ends. Capping only from above let a negative discount
+    // through, which then *increased* the total — a "-500 discount" would bill
+    // ₹500 more than the line items.
+    const discount = Math.min(Math.max(input.discountMinor ?? 0, 0), subtotal)
+
+    // Tax defaults from platform settings when the caller omits it. Making the
+    // repository the backstop means a new call site cannot silently issue an
+    // untaxed invoice — which is exactly how the automated renewal path and the
+    // lead-conversion path both ended up under-billing GST.
+    //
+    // `?? ` not `||`: an admin's deliberate 0 must survive. And the `enabled`
+    // gate matters — a stale non-zero percent with tax switched off must not
+    // start charging.
+    const settings = getTaxSettings()
+    const taxPercent = input.taxPercent ?? (settings.enabled ? settings.percent : 0)
+    const taxName =
+      input.taxName !== undefined ? input.taxName : settings.enabled ? settings.name : null
     // Rounded once on the taxable base, never per line — that is what keeps
     // subtotal - discount + tax === total exactly.
     const tax = Math.round(((subtotal - discount) * taxPercent) / 100)
@@ -296,7 +339,7 @@ export function createInvoice(input: CreateInvoiceInput): string {
       id, input.businessId, input.subscriptionId ?? null, number,
       input.status ?? 'draft', input.currency ?? 'INR',
       subtotal, discount, tax, total,
-      input.taxName ?? null, taxPercent,
+      taxName, taxPercent,
       issueDate, input.dueDate, input.notes ?? null, now(), now(),
     )
 
@@ -378,8 +421,9 @@ export function markOverdueInvoices(): number {
           SET status = 'overdue', updated_at = ?
         WHERE deleted_at IS NULL
           AND status IN ('sent','partial')
-          AND date(due_date) < date(?)`,
+          AND due_date < ?
+          AND total_minor > paid_minor`,
     )
-    .run(now(), now().slice(0, 10))
+    .run(now(), now())
   return result.changes as number
 }

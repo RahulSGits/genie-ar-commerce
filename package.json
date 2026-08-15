@@ -1,9 +1,10 @@
 {
-  "name": "arview-commerce",
+  "name": "genie-ar-commerce",
   "version": "0.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "billing:tick": "node scripts/billing-tick.mjs",
     "dev:https": "next dev --experimental-https --experimental-https-key ./certificates/key.pem --experimental-https-cert ./certificates/cert.pem -H 0.0.0.0",
     "build": "NEXT_DIST_DIR=.next-build next build",
     "start": "next start",

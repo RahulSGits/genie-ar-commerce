@@ -123,13 +123,16 @@ export function applyDiscount(
   gross: Money,
   discount: { type: 'percentage' | 'fixed'; value: number },
 ): { net: Money; discountAmount: Money } {
-  const discountAmount =
+  const raw =
     discount.type === 'percentage'
-      ? percentOf(gross, discount.value)
-      : { amount: Math.min(discount.value, gross.amount), currency: gross.currency }
+      ? percentOf(gross, discount.value).amount
+      : discount.value
 
+  // Clamped at BOTH ends. Capping only from above let a negative discount
+  // through, which then increased the net — the opposite of what the doc
+  // comment promised and of what the word "discount" means.
   const capped: Money = {
-    amount: Math.min(discountAmount.amount, gross.amount),
+    amount: Math.min(Math.max(raw, 0), Math.max(gross.amount, 0)),
     currency: gross.currency,
   }
 

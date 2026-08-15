@@ -6,7 +6,8 @@ import {
 import { requireBusiness } from '@/lib/auth/guards'
 import { getBusinessById, getEntitlements, getUsage, getSubscription, getPlan } from '@/lib/db/repositories/businesses'
 import { getBusinessStats, getDailySeries, getFunnel, getTopProducts } from '@/lib/db/repositories/analytics'
-import { getBillingSummary, markOverdueInvoices } from '@/lib/db/repositories/billing'
+import { getBillingSummary } from '@/lib/db/repositories/billing'
+import { maybeRunBillingTick } from '@/lib/billing/engine'
 import { listProducts } from '@/lib/db/repositories/catalog'
 import { usageBars } from '@/lib/billing/entitlements'
 import { getTerminology } from '@/config/terminology'
@@ -23,8 +24,9 @@ export default async function DashboardOverview() {
   const business = getBusinessById(ctx.businessId)!
   const terminology = getTerminology(business.category)
 
-  // Lazy sweep: with no cron worker, statuses are brought up to date on read.
-  markOverdueInvoices()
+  // Keeps this business's invoice statuses and reminders current without a
+  // job runner. Rate-limited internally.
+  maybeRunBillingTick()
 
   const stats = getBusinessStats(ctx.businessId, 30)
   const series = getDailySeries(ctx.businessId, 30)
@@ -145,18 +147,22 @@ export default async function DashboardOverview() {
               ['AR session', funnel.ar_session_started],
               ['Clicked CTA', funnel.cta_clicked],
             ].map(([label, count]) => {
-              const top = funnel.qr_scanned || 1
-              const pct = percentage(Number(count), top, 0)
+              // No substitute denominator. `|| 1` turned a period with zero
+              // scans into every stage reading as count x 100%.
+              const top = funnel.qr_scanned
+              const pct = top > 0 ? percentage(Number(count), top, 0) : null
               return (
                 <div key={String(label)}>
                   <div className="mb-1 flex items-baseline justify-between text-sm">
                     <span className="text-muted-foreground">{label}</span>
                     <span className="font-medium tabular-nums">
                       {Number(count).toLocaleString('en-IN')}
-                      <span className="text-muted-foreground ml-1.5 text-xs">{pct}%</span>
+                      <span className="text-muted-foreground ml-1.5 text-xs">
+                        {pct === null ? '—' : `${pct}%`}
+                      </span>
                     </span>
                   </div>
-                  <Progress value={pct} />
+                  <Progress value={pct ?? 0} />
                 </div>
               )
             })}

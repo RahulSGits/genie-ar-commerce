@@ -592,19 +592,21 @@ function setSetting(key, value) {
 }
 
 setSetting('branding', {
-  name: 'ARView Commerce',
-  tagline: 'Turn your products into interactive AR experiences',
+  name: 'GENIE',
+  tagline: 'Turn Any Product Into 3D & AR.',
   logoUrl: null,
-  faviconEmoji: '📦',
-  primaryColor: '#5b3df5',
-  supportEmail: 'support@arview.local',
+  faviconEmoji: '🜲',
+  primaryColor: '#7c3aed',
+  supportEmail: 'support@genie.local',
   supportPhone: '+91 98200 00000',
 })
 
 // Everything requiring a paid third party is OFF by default. Nothing here can
 // start billing anyone by surprise.
 setSetting('feature_flags', {
-  model_generation: false,
+  // The development provider needs no key and no spend; it is what makes the
+  // generation pipeline runnable out of the box.
+  model_generation: true,
   payments: false,
   whatsapp: false,
   voice_calling: false,
@@ -620,10 +622,11 @@ setSetting('billing', { gracePeriodDays: 7, autoSuspend: false, invoicePrefix: '
 
 const CMS = [
   ['landing_hero', {
-    heading: 'Turn Your Products Into Interactive AR Experiences',
-    subheading: 'Let customers see your products in 3D and in their real environment — directly from a QR code.',
-    primaryCta: { label: 'Start Your Business', href: '/signup' },
-    secondaryCta: { label: 'View Demo', href: '/ar/urban-bites/signature-burger' },
+    heading: 'Turn Any Product Into 3D & AR.',
+    subheading:
+      'Upload a product image. GENIE turns it into an immersive 3D experience, generates a shareable QR code, and lets customers view it in AR — no app, no signup.',
+    primaryCta: { label: 'Create Your First 3D Product', href: '/dashboard/create' },
+    secondaryCta: { label: 'See How It Works', href: '#how' },
   }],
   ['landing_features', {
     items: [
@@ -637,7 +640,8 @@ const CMS = [
     items: [
       { q: 'Do customers need an app?', a: 'No. They scan the QR and the experience opens in their browser.' },
       { q: 'Does AR work on every phone?', a: 'AR availability depends on the device and browser. Where AR is unavailable the product still opens in an interactive 3D viewer.' },
-      { q: 'Who creates the 3D models?', a: 'You can upload your own GLB files, or we can produce them for a one-time setup fee.' },
+      { q: 'Where do the 3D models come from?', a: 'Upload a GLB you already have, or connect an AI generation provider and create one from product photos. GENIE never claims a model was AI-generated when it was not.' },
+      { q: 'Is the product shown at its real size?', a: 'Yes. glTF units are metres and the viewer runs in fixed scale, so a 30 cm pizza lands on the table as 30 cm.' },
       { q: 'How do I pay?', a: 'We invoice you directly. Bank transfer, UPI or cash — no card required.' },
     ],
   }],

@@ -143,10 +143,12 @@ export default async function AnalyticsPage({
                         <span className="text-muted-foreground">{label}</span>
                         <span className="font-medium tabular-nums">
                           {count.toLocaleString('en-IN')}
-                          <span className="text-muted-foreground ml-1.5 text-xs">{pct}%</span>
+                          <span className="text-muted-foreground ml-1.5 text-xs">
+                        {pct === null ? '—' : `${pct}%`}
+                      </span>
                         </span>
                       </div>
-                      <Progress value={pct} />
+                      <Progress value={pct ?? 0} />
                     </div>
                   )
                 })}
@@ -175,10 +177,12 @@ export default async function AnalyticsPage({
                           <span className="text-muted-foreground capitalize">{device.label}</span>
                           <span className="font-medium tabular-nums">
                             {device.count.toLocaleString('en-IN')}
-                            <span className="text-muted-foreground ml-1.5 text-xs">{pct}%</span>
+                            <span className="text-muted-foreground ml-1.5 text-xs">
+                        {pct === null ? '—' : `${pct}%`}
+                      </span>
                           </span>
                         </div>
-                        <Progress value={pct} />
+                        <Progress value={pct ?? 0} />
                       </div>
                     )
                   })

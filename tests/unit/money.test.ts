@@ -118,3 +118,39 @@ describe('formatting', () => {
     expect(formatMoney(money(199950))).toContain('1,999.50')
   })
 })
+
+describe('discount clamping (regression)', () => {
+  it('ignores a negative percentage rather than inflating the total', () => {
+    // A negative discount previously flowed straight through and INCREASED the
+    // net — a "-20% discount" billed 20% more.
+    const { net, discountAmount } = applyDiscount(money(100000), {
+      type: 'percentage',
+      value: -20,
+    })
+    expect(discountAmount.amount).toBe(0)
+    expect(net.amount).toBe(100000)
+  })
+
+  it('ignores a negative fixed amount', () => {
+    const { net, discountAmount } = applyDiscount(money(100000), {
+      type: 'fixed',
+      value: -50000,
+    })
+    expect(discountAmount.amount).toBe(0)
+    expect(net.amount).toBe(100000)
+  })
+
+  it('never returns a net greater than the gross, for any input', () => {
+    const values = [-1_000_000, -1, 0, 1, 50, 100, 150, 1_000_000]
+    for (const value of values) {
+      for (const type of ['percentage', 'fixed'] as const) {
+        const { net, discountAmount } = applyDiscount(money(99900), { type, value })
+        expect(net.amount).toBeLessThanOrEqual(99900)
+        expect(net.amount).toBeGreaterThanOrEqual(0)
+        expect(discountAmount.amount).toBeGreaterThanOrEqual(0)
+        // The two must always reconcile back to the gross.
+        expect(net.amount + discountAmount.amount).toBe(99900)
+      }
+    }
+  })
+})

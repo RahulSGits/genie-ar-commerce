@@ -557,13 +557,18 @@ export function getUsage(businessId: string): UsageSnapshot {
       `SELECT COUNT(*) AS c FROM qr_codes WHERE business_id = ? AND deleted_at IS NULL`,
       businessId,
     ),
+    // Storage is charged for EVERYTHING a business uploads. Counting only 3D
+    // models would let image uploads consume disk against no quota at all.
     storageBytes: num(
       db
         .prepare(
-          `SELECT COALESCE(SUM(file_size_bytes), 0) AS c FROM three_d_models
-            WHERE business_id = ? AND deleted_at IS NULL`,
+          `SELECT
+             COALESCE((SELECT SUM(file_size_bytes) FROM three_d_models
+                        WHERE business_id = ? AND deleted_at IS NULL), 0)
+           + COALESCE((SELECT SUM(bytes) FROM product_images
+                        WHERE business_id = ?), 0) AS c`,
         )
-        .get(businessId) as Row,
+        .get(businessId, businessId) as Row,
       'c',
     ),
     teamMembers: one(`SELECT COUNT(*) AS c FROM business_members WHERE business_id = ?`, businessId),

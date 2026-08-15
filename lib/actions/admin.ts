@@ -214,12 +214,27 @@ const planSchema = z.object({
   sortOrder: z.coerce.number().int().min(0).max(100).default(0),
 })
 
-/** Empty string means unlimited, which is stored as NULL. */
-const toLimit = (raw: string): number | null => {
+/**
+ * Parses a plan limit field.
+ *
+ * Empty or "unlimited" means NULL (no ceiling). Anything else must be a
+ * non-negative integer.
+ *
+ * Returning a discriminated result rather than a bare `number | null` matters
+ * more than it looks: the previous version collapsed unparseable input to null,
+ * so a typo of "abc" or "-5" in the pricing editor silently granted every
+ * business on that plan UNLIMITED products, models and QR codes. A validation
+ * mistake must not be indistinguishable from a deliberate "no limit".
+ */
+type ParsedLimit = { ok: true; value: number | null } | { ok: false }
+
+const toLimit = (raw: string): ParsedLimit => {
   const t = raw.trim()
-  if (t === '' || t.toLowerCase() === 'unlimited') return null
+  if (t === '' || t.toLowerCase() === 'unlimited') return { ok: true, value: null }
+
   const n = Number(t)
-  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : null
+  if (!Number.isFinite(n) || n < 0 || !Number.isInteger(n)) return { ok: false }
+  return { ok: true, value: n }
 }
 
 export async function savePlanAction(
@@ -246,7 +261,28 @@ export async function savePlanAction(
     model_generation: formData.get('model_generation') === 'on',
   }
 
-  const storageMb = toLimit(d.storageMb)
+  // Every limit is validated before ANY of them is written. A rejected field
+  // must not leave the plan half-updated with the others already applied.
+  const limitFields: Array<[label: string, raw: string]> = [
+    ['Products', d.maxProducts],
+    ['AR models', d.maxArModels],
+    ['QR codes', d.maxQrCodes],
+    ['Team members', d.maxTeamMembers],
+    ['Storage (MB)', d.storageMb],
+  ]
+
+  const limits: Array<number | null> = []
+  for (const [label, raw] of limitFields) {
+    const result = toLimit(raw)
+    if (!result.ok) {
+      return fail(
+        `“${label}” must be a whole number of 0 or more, or left blank for unlimited. ` +
+          `Got “${raw.trim()}”.`,
+      )
+    }
+    limits.push(result.value)
+  }
+  const [maxProducts, maxArModels, maxQrCodes, maxTeamMembers, storageMb] = limits
 
   upsertPlan({
     id: d.id || undefined,
@@ -262,11 +298,12 @@ export async function savePlanAction(
     sortOrder: d.sortOrder,
     archived: formData.get('archived') === 'on',
     limits: {
-      maxProducts: toLimit(d.maxProducts),
-      maxArModels: toLimit(d.maxArModels),
-      maxQrCodes: toLimit(d.maxQrCodes),
-      maxTeamMembers: toLimit(d.maxTeamMembers),
-      maxStorageBytes: storageMb === null ? null : storageMb * 1024 * 1024,
+      maxProducts: maxProducts ?? null,
+      maxArModels: maxArModels ?? null,
+      maxQrCodes: maxQrCodes ?? null,
+      maxTeamMembers: maxTeamMembers ?? null,
+      maxStorageBytes:
+        storageMb === null || storageMb === undefined ? null : storageMb * 1024 * 1024,
       maxMonthlyScans: null,
     },
     features,

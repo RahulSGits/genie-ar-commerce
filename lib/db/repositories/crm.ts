@@ -6,6 +6,7 @@ import {
 } from '@/lib/db'
 import { createBusiness, createSubscription, addMember, getPlan } from '@/lib/db/repositories/businesses'
 import { createInvoice } from '@/lib/db/repositories/billing'
+import { getTaxSettings } from '@/lib/db/repositories/platform'
 import { slugify } from '@/lib/utils'
 import type {
   CrmActivity, CrmLead, CrmNote, CrmStage, CrmTask, InvoiceItemKind,
@@ -326,12 +327,17 @@ export function convertLeadToBusiness(input: {
     const due = new Date()
     due.setDate(due.getDate() + 7)
 
+    // Tax is explicit here too: createInvoice defaults it to 0, so the very
+    // first invoice a new client receives would otherwise omit GST.
+    const tax = getTaxSettings()
     const invoiceId = createInvoice({
       businessId,
       items,
       dueDate: due.toISOString(),
       status: 'sent',
       currency: plan.currency,
+      taxName: tax.enabled ? tax.name : null,
+      taxPercent: tax.enabled ? tax.percent : 0,
     })
 
     updateLead(input.leadId, { stage: 'won', convertedBusinessId: businessId })

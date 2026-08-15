@@ -13,6 +13,7 @@ import {
   type UploadedImage,
 } from '@/lib/actions/genie'
 import { PLACEMENT_MODES, PLACEMENT_LABELS, type PlacementMode } from '@/config/terminology'
+import GenerationProgress from '@/components/dashboard/GenerationProgress'
 import { formatBytes, cn } from '@/lib/utils'
 
 /**
@@ -44,6 +45,8 @@ export default function CreateWizard({
   const [step, setStep] = useState<Step>('upload')
   const [images, setImages] = useState<UploadedImage[]>([])
   const [productId, setProductId] = useState<string | null>(null)
+  const [productName, setProductName] = useState('')
+  const [jobId, setJobId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, startTransition] = useTransition()
   const [uploading, setUploading] = useState(false)
@@ -83,6 +86,7 @@ export default function CreateWizard({
       return
     }
     setProductId(result.data.productId)
+    setProductName(String(formData.get('name') ?? 'Your product'))
     setStep('generate')
   }
 
@@ -96,7 +100,9 @@ export default function CreateWizard({
       setError(result.error)
       return
     }
-    router.push(`/dashboard/products/${productId}`)
+    // Stay here and show real progress rather than dropping the user on a
+    // product page that has nothing on it yet.
+    setJobId(result.data.jobId)
   }
 
   return (
@@ -290,7 +296,11 @@ export default function CreateWizard({
       )}
 
       {/* ── step 3 ─────────────────────────────────────────────────────── */}
-      {step === 'generate' && (
+      {step === 'generate' && jobId && productId && (
+        <GenerationProgress jobId={jobId} productId={productId} productName={productName} />
+      )}
+
+      {step === 'generate' && !jobId && (
         <Card className="p-6">
           <h2 className="text-lg font-semibold">Add a 3D model</h2>
           <p className="text-muted-foreground mt-1 text-sm">

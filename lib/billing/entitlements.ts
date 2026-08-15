@@ -176,13 +176,35 @@ export function checkLimit(
   if (current + additional <= limit) return { allowed: true }
 
   const noun = LIMIT_NOUNS[key]
+  const show = (value: number) => formatLimitValue(key, value)
+
   return {
     allowed: false,
     reason: 'limit_reached',
-    message: `Your ${entitlements.planName} plan includes ${limit} ${noun} and you're using ${current}. Upgrade to add more.`,
+    message:
+      key === 'maxStorageBytes'
+        ? `Your ${entitlements.planName} plan includes ${show(limit)} of storage and you're using ${show(current)}. Upgrade or delete something to free space.`
+        : `Your ${entitlements.planName} plan includes ${limit} ${noun} and you're using ${current}. Upgrade to add more.`,
     limit,
     current,
   }
+}
+
+/**
+ * Renders a limit value in its own units. Byte counts must never reach a user
+ * as raw integers — "104857600 storage" is not a sentence anyone can act on.
+ */
+export function formatLimitValue(key: LimitKey, value: number): string {
+  if (key !== 'maxStorageBytes') return String(value)
+  if (value === 0) return '0 MB'
+
+  const units = ['B', 'KB', 'MB', 'GB']
+  const i = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1)
+  const scaled = value / Math.pow(1024, i)
+  // Drop a meaningless trailing .0 — "100 MB" reads as a quota, "100.0 MB"
+  // reads as a measurement.
+  const rounded = Number(scaled.toFixed(1))
+  return `${Number.isInteger(rounded) ? rounded : rounded.toFixed(1)} ${units[i]}`
 }
 
 export function checkFeature(
@@ -242,7 +264,19 @@ export function usageBars(e: Entitlements, u: UsageSnapshot): UsageBar[] {
   return (Object.keys(LIMIT_TO_USAGE) as LimitKey[]).map((key) => {
     const limit = e.limits[key]
     const current = u[LIMIT_TO_USAGE[key]]
-    const percent = limit === UNLIMITED ? null : Math.min(100, (current / Math.max(limit, 1)) * 100)
+
+    let percent: number | null
+    if (limit === UNLIMITED) {
+      percent = null
+    } else if (limit <= 0) {
+      // A limit of zero means none are allowed, so the allowance is fully
+      // consumed by definition. The old `Math.max(limit, 1)` divisor quietly
+      // treated 0 as 1 and reported a plan that permits nothing as 0% used.
+      percent = 100
+    } else {
+      percent = Math.min(100, (current / limit) * 100)
+    }
+
     return {
       label: LIMIT_NOUNS[key],
       current,

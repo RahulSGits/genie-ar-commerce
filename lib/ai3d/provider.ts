@@ -31,6 +31,9 @@ import 'server-only'
  * per call.
  */
 
+import { DevelopmentProvider } from '@/lib/ai3d/providers/development'
+import { MeshyProvider } from '@/lib/ai3d/providers/meshy'
+
 export type GenerationStage =
   | 'uploading'
   | 'analyzing'
@@ -91,6 +94,13 @@ export type GenerationResult = {
   posterUrl?: string | null
   fileSizeBytes?: number
   triangleCount?: number
+  /**
+   * True when the asset is a stand-in rather than a reconstruction of the
+   * submitted images. Set only by the development provider; carried through to
+   * the model name and a banner in the product workspace so a placeholder can
+   * never be mistaken for a generated model.
+   */
+  isPlaceholder?: boolean
 }
 
 /**
@@ -170,12 +180,13 @@ class NullProvider implements AI3DProvider {
 const PROVIDERS: Record<string, () => AI3DProvider> = {
   none: () => new NullProvider(),
 
-  // Example of what a real entry looks like. Left commented rather than
-  // half-implemented, so nothing here can appear to work when it does not:
-  //
-  // meshy: () => new MeshyProvider(process.env.MODEL_GEN_API_KEY),
-  // tripo: () => new TripoProvider(process.env.MODEL_GEN_API_KEY),
-  // local: () => new LocalPhotogrammetryProvider(process.env.MODEL_GEN_API_URL),
+  // Exercises the full pipeline with no external service and no key. Returns a
+  // demo GLB flagged as a placeholder — never presented as generated output.
+  development: () => new DevelopmentProvider(),
+
+  // Real image-to-3D. Written against the published API but never executed
+  // against it, since that needs a paid key — see the note in the adapter.
+  meshy: () => new MeshyProvider(process.env.MODEL_GEN_API_KEY),
 }
 
 export function getProvider(): AI3DProvider {
