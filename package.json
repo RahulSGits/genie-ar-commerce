@@ -16,7 +16,9 @@
     "db:reset": "rm -rf data && npm run db:models && npm run db:seed",
     "db:seed": "node scripts/seed.mjs",
     "verify": "npm run typecheck && npm run lint && npm run test && npm run build",
-    "db:models": "node scripts/generate-demo-models.mjs"
+    "db:models": "node scripts/generate-demo-models.mjs",
+    "db:migrate": "node --env-file=.env.local scripts/db-migrate.mjs",
+    "db:health": "node --env-file=.env.local scripts/db-health.mjs"
   },
   "dependencies": {
     "@ar-js-org/ar.js": "^3.4.8",
@@ -44,6 +46,7 @@
     "lucide-react": "^0.544.0",
     "motion": "^12.23.12",
     "next": "15.5.4",
+    "postgres": "^3.4.9",
     "qrcode": "^1.5.4",
     "react": "19.1.1",
     "react-dom": "19.1.1",
