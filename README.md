@@ -41,14 +41,22 @@ Open http://localhost:3000.
 
 ### Sign-in
 
-The seed prints these. Credentials come from `ADMIN_EMAIL` / `ADMIN_PASSWORD`
-when set; otherwise it uses documented development defaults and warns.
+**There are no default passwords in this repository.** `npm run db:seed`
+generates a fresh pair each run and writes them to `.seed-credentials.json`
+(gitignored, `chmod 600`). They are also printed when the seed finishes.
 
-| Role | URL | Email | Password |
-| --- | --- | --- | --- |
-| Super admin | `/admin/login` | `admin@arview.local` | `arview-admin-2026` |
-| Business (restaurant, paid) | `/login` | `owner@urbanbites.local` | `demo-business-2026` |
-| Business (clothing, on trial) | `/login` | `owner@urbanthreads.local` | `demo-business-2026` |
+| Role | URL | Email |
+| --- | --- | --- |
+| Super admin | `/admin/login` | `admin@genie.local` |
+| Business (restaurant, paid plan) | `/login` | `owner@urbanbites.local` |
+| Business (clothing, on trial) | `/login` | `owner@urbanthreads.local` |
+
+To choose your own instead, set `ADMIN_PASSWORD` and `DEMO_PASSWORD` in
+`.env.local` before seeding.
+
+```bash
+cat .seed-credentials.json   # recover them after the console scrolls away
+```
 
 ### Try the customer journey — no login
 

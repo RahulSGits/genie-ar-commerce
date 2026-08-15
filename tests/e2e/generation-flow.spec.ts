@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { CREDENTIALS } from './credentials'
 
 /**
  * The GENIE creation pipeline, end to end:
@@ -15,7 +16,8 @@ import { expect, test } from '@playwright/test'
  * never do.
  */
 
-const OWNER = { email: 'owner@urbanbites.local', password: 'demo-business-2026' }
+// Read from the seed output — no password literal lives in this repo.
+const OWNER = CREDENTIALS.business
 
 /** A real PNG, built in-page, so server-side magic-byte validation is genuinely tested. */
 const PNG_DATA_URL =

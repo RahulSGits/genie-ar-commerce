@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { CREDENTIALS } from './credentials'
 
 /**
  * The operator journey: sign in, then reach every dashboard section.
@@ -7,7 +8,8 @@ import { expect, test } from '@playwright/test'
  * 404s is worse than a missing feature, because it looks finished.
  */
 
-const OWNER = { email: 'owner@urbanbites.local', password: 'demo-business-2026' }
+// Read from the seed output — no password literal lives in this repo.
+const OWNER = CREDENTIALS.business
 
 async function signIn(page: import('@playwright/test').Page) {
   await page.goto('/login')
