@@ -1,6 +1,6 @@
 import {
-  BarChart3, Boxes, Building2, CreditCard, LayoutDashboard,
-  LifeBuoy, QrCode, Settings, ShoppingBag, Sparkles,
+  BarChart3, Boxes, Building2, CreditCard, Layers, LayoutDashboard,
+  LifeBuoy, Palette, QrCode, Settings, ShoppingBag, Sparkles,
 } from 'lucide-react'
 import Shell, { type NavSection } from '@/components/dashboard/Shell'
 import { requireBusiness } from '@/lib/auth/guards'
@@ -24,6 +24,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         { href: '/dashboard', label: 'Overview', icon: <LayoutDashboard /> },
         { href: '/dashboard/create', label: 'Create', icon: <Sparkles /> },
         { href: '/dashboard/products', label: terminology.itemPlural, icon: <ShoppingBag /> },
+        { href: '/dashboard/collections', label: 'Collections', icon: <Layers /> },
         { href: '/dashboard/models', label: '3D Models', icon: <Boxes /> },
         { href: '/dashboard/qr', label: 'QR Codes', icon: <QrCode /> },
         { href: '/dashboard/analytics', label: 'Analytics', icon: <BarChart3 /> },
@@ -33,6 +34,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
       title: 'Account',
       items: [
         { href: '/dashboard/business', label: 'Business Profile', icon: <Building2 /> },
+        { href: '/dashboard/brand', label: 'Brand', icon: <Palette /> },
         { href: '/dashboard/billing', label: 'Billing', icon: <CreditCard />, badge: outstanding },
         { href: '/dashboard/settings', label: 'Settings', icon: <Settings /> },
         { href: '/dashboard/support', label: 'Help', icon: <LifeBuoy /> },

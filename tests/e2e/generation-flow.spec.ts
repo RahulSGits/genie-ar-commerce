@@ -32,7 +32,10 @@ async function signIn(page: import('@playwright/test').Page) {
   await page.waitForURL(/\/dashboard/, { timeout: 60_000 })
 }
 
-test.describe('3D generation pipeline', () => {
+// Serial: the labelling test asserts on a model the generation test creates.
+// Run in parallel they race, and the second fails for reasons that have nothing
+// to do with the code under test.
+test.describe.serial('3D generation pipeline', () => {
   test('creates a product from an image and attaches a generated model', async ({ page }) => {
     test.setTimeout(120_000)
     await signIn(page)
@@ -92,6 +95,7 @@ test.describe('3D generation pipeline', () => {
   })
 
   test('a generated placeholder is labelled as one, never as AI output', async ({ page }) => {
+    // Depends on the generation test above having produced a model.
     await signIn(page)
     await page.goto('/dashboard/models')
 

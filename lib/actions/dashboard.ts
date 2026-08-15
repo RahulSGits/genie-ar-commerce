@@ -317,7 +317,32 @@ const profileSchema = z.object({
   menuUrl: z.string().trim().url().optional().nullable().or(z.literal('')),
   storeUrl: z.string().trim().url().optional().nullable().or(z.literal('')),
   whatsappNumber: z.string().trim().max(30).optional().nullable(),
+  // Brand Studio writes these. Without them declared, zod's non-strict object
+  // dropped them silently — the user pasted a logo URL, saw "Branding saved",
+  // and got no logo.
+  logoUrl: z.string().trim().url().optional().nullable().or(z.literal('')),
+  coverUrl: z.string().trim().url().optional().nullable().or(z.literal('')),
 })
+
+/** Form field → database column, for the patch below. */
+const PROFILE_COLUMNS: Record<string, string> = {
+  name: 'name',
+  description: 'description',
+  category: 'category',
+  phone: 'phone',
+  email: 'email',
+  address: 'address',
+  city: 'city',
+  brandColor: 'brand_color',
+  websiteUrl: 'website_url',
+  instagramUrl: 'instagram_url',
+  orderingUrl: 'ordering_url',
+  menuUrl: 'menu_url',
+  storeUrl: 'store_url',
+  whatsappNumber: 'whatsapp_number',
+  logoUrl: 'logo_url',
+  coverUrl: 'cover_url',
+}
 
 export async function updateProfileAction(
   _prev: ActionResult<null> | null,
@@ -329,28 +354,35 @@ export async function updateProfileAction(
     const issue = parsed.error.issues[0]
     return fail(issue?.message ?? 'Check the form.', String(issue?.path[0] ?? ''))
   }
-  const d = parsed.data
+  const d = parsed.data as Record<string, unknown>
 
-  // Note: `status` and `internal_notes` are NOT in the writable list inside
-  // updateBusiness, so a business can never suspend/unsuspend itself here.
-  updateBusiness(ctx.businessId, {
-    name: d.name,
-    description: d.description,
-    category: d.category,
-    phone: d.phone,
-    email: d.email || null,
-    address: d.address,
-    city: d.city,
-    brand_color: d.brandColor || null,
-    website_url: d.websiteUrl || null,
-    instagram_url: d.instagramUrl || null,
-    ordering_url: d.orderingUrl || null,
-    menu_url: d.menuUrl || null,
-    store_url: d.storeUrl || null,
-    whatsapp_number: d.whatsappNumber,
-  })
+  // A PATCH, not a full-row write.
+  //
+  // Previously every declared field was sent regardless, so a form that only
+  // exposed some of them — Brand Studio, say — wrote NULL over the rest. Two
+  // tabs open on different profile pages would clobber each other, and the
+  // second save silently erased whatever the first had set.
+  //
+  // Only keys the form actually submitted are written. `status` and `slug`
+  // remain outside updateBusiness's writable list, so a business still cannot
+  // suspend or rename itself here, and internal notes are not reachable at all.
+  const patch: Record<string, unknown> = {}
+  for (const [field, column] of Object.entries(PROFILE_COLUMNS)) {
+    if (!formData.has(field)) continue
+    const value = d[field]
+    // '' means "cleared" for optional fields, and NULL is the honest storage
+    // for that — but it must be an explicit submission, not an absent one.
+    patch[column] = value === '' || value === undefined ? null : value
+  }
+
+  if (Object.keys(patch).length === 0) {
+    return fail('Nothing to save.')
+  }
+
+  updateBusiness(ctx.businessId, patch)
 
   revalidatePath('/dashboard/business')
+  revalidatePath('/dashboard/brand')
   return { ok: true, data: null }
 }
 
