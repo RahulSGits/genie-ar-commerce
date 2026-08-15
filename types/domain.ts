@@ -64,8 +64,6 @@ export type Business = {
   currency: CurrencyCode
   timezone: string
   status: BusinessStatus
-  /** Super-admin only. Never sent to a business dashboard. */
-  internalNotes: string | null
 
   createdAt: string
   updatedAt: string

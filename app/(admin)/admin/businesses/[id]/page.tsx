@@ -3,7 +3,8 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { ArrowLeft, Boxes, ExternalLink, FileText, IndianRupee, QrCode, ScanLine } from 'lucide-react'
 import { requireSuperAdmin } from '@/lib/auth/guards'
-import { getBusinessById, getSubscription, listMembers, listPlans } from '@/lib/db/repositories/businesses'
+import { getBusinessById, getSubscription, listMembers, listPlans, getInternalNotes
+} from '@/lib/db/repositories/businesses'
 import { getBusinessStats } from '@/lib/db/repositories/analytics'
 import { listProducts } from '@/lib/db/repositories/catalog'
 import { listQrCodes } from '@/lib/db/repositories/qr'
@@ -175,7 +176,7 @@ export default async function AdminBusinessDetail({
         businessStatus={business.status}
         subscription={subscription}
         plans={plans}
-        internalNotes={business.internalNotes}
+        internalNotes={getInternalNotes(business.id)}
       />
 
       <Card>

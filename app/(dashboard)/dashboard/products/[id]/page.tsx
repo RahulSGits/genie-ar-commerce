@@ -1,12 +1,12 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
-import { ArrowLeft, ExternalLink } from 'lucide-react'
+import { ArrowLeft, Download, ExternalLink } from 'lucide-react'
 import { requireBusiness } from '@/lib/auth/guards'
 import { getBusinessById } from '@/lib/db/repositories/businesses'
 import { getModel, getProduct, listCategories, listModels } from '@/lib/db/repositories/catalog'
 import { deleteProductAction, updateProductAction } from '@/lib/actions/dashboard'
 import { getTerminology } from '@/config/terminology'
-import { Alert, Badge, Card, CardContent, CardHeader, CardTitle } from '@/components/ui'
+import { Alert, Badge, Button, Card, CardContent, CardHeader, CardTitle } from '@/components/ui'
 import ModelViewer from '@/components/ar/ModelViewer'
 import ProductForm from '@/components/dashboard/ProductForm'
 
@@ -56,6 +56,12 @@ export default async function EditProductPage({
           >
             {product.status}
           </Badge>
+          <Button asChild size="sm" variant="outline" className="ml-auto">
+            <Link href={`/dashboard/products/${product.id}/downloads`}>
+              <Download className="size-3.5" aria-hidden />
+              Downloads
+            </Link>
+          </Button>
         </div>
         <p className="text-muted-foreground text-sm">
           {product.status === 'published' ? (

@@ -64,7 +64,6 @@ function mapBusiness(row: Row): Business {
     currency: (str(row, 'currency') || 'INR') as CurrencyCode,
     timezone: str(row, 'timezone') || 'Asia/Kolkata',
     status: (str(row, 'status') || 'active') as BusinessStatus,
-    internalNotes: strOrNull(row, 'internal_notes'),
     createdAt: str(row, 'created_at'),
     updatedAt: str(row, 'updated_at'),
   }
@@ -247,8 +246,9 @@ export function createBusiness(input: CreateBusinessInput): string {
 
 /**
  * Partial update. Only whitelisted columns can be written — the field list is
- * closed, so a crafted form payload cannot reach `status` or `internal_notes`
- * through the business-facing profile action.
+ * closed, so a crafted form payload cannot reach `status` or `slug` through the
+ * business-facing profile action. Internal notes are not reachable at all —
+ * they live in their own table.
  */
 const BUSINESS_WRITABLE = [
   'name', 'category', 'description', 'logo_url', 'cover_url', 'brand_color',
@@ -257,7 +257,7 @@ const BUSINESS_WRITABLE = [
   'reservation_url', 'store_url', 'opening_hours', 'currency', 'timezone',
 ] as const
 
-const BUSINESS_ADMIN_ONLY = ['status', 'internal_notes', 'slug'] as const
+const BUSINESS_ADMIN_ONLY = ['status', 'slug'] as const
 
 export function updateBusiness(
   id: string,
@@ -579,4 +579,33 @@ export function getUsage(businessId: string): UsageSnapshot {
       monthKey,
     ),
   }
+}
+
+
+/* ── internal notes ─────────────────────────────────────────────────────── */
+
+/**
+ * Admin-only notes about a client.
+ *
+ * A separate table rather than a column on `businesses`, because the public
+ * product page must be able to read a business row and row-level security
+ * cannot hide a single column. Callers of both functions must already have
+ * passed requireSuperAdmin().
+ */
+export function getInternalNotes(businessId: string): string {
+  const row = getDb()
+    .prepare(`SELECT notes FROM business_internal_notes WHERE business_id = ?`)
+    .get(businessId) as Row | undefined
+  return row ? str(row, 'notes') : ''
+}
+
+export function setInternalNotes(businessId: string, notes: string, actorId: string): void {
+  getDb()
+    .prepare(
+      `INSERT INTO business_internal_notes (business_id, notes, updated_at, updated_by)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(business_id) DO UPDATE SET
+         notes = excluded.notes, updated_at = excluded.updated_at, updated_by = excluded.updated_by`,
+    )
+    .run(businessId, notes.slice(0, 4000), now(), actorId)
 }

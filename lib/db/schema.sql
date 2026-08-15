@@ -97,8 +97,6 @@ CREATE TABLE IF NOT EXISTS businesses (
 
   -- active | suspended | archived. Suspension is an explicit admin action.
   status            TEXT NOT NULL DEFAULT 'active',
-  -- Super-admin-only free text. Never exposed to the business.
-  internal_notes    TEXT,
 
   created_at        TEXT NOT NULL,
   updated_at        TEXT NOT NULL,
@@ -106,6 +104,19 @@ CREATE TABLE IF NOT EXISTS businesses (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_businesses_slug ON businesses (slug) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_businesses_status ON businesses (status);
+
+-- Admin-only notes, deliberately NOT a column on businesses.
+--
+-- The public product page has to read a business row, and row-level security is
+-- row-level — a column on `businesses` is reachable by anything that selects
+-- the row. Keeping notes in their own table makes admin-only structural rather
+-- than a promise the mapper has to keep.
+CREATE TABLE IF NOT EXISTS business_internal_notes (
+  business_id TEXT PRIMARY KEY REFERENCES businesses(id) ON DELETE CASCADE,
+  notes       TEXT NOT NULL DEFAULT '',
+  updated_at  TEXT NOT NULL,
+  updated_by  TEXT REFERENCES users(id) ON DELETE SET NULL
+);
 
 CREATE TABLE IF NOT EXISTS business_members (
   id           TEXT PRIMARY KEY,

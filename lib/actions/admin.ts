@@ -5,7 +5,7 @@ import { redirect } from 'next/navigation'
 import { z } from 'zod'
 import { requireSuperAdmin } from '@/lib/auth/guards'
 import {
-  setBusinessStatus, updateBusiness, updateSubscription, upsertPlan,
+  setBusinessStatus, updateBusiness, updateSubscription, upsertPlan, setInternalNotes,
   getPlan, getBusinessById, getSubscription, createBusiness, addMember, createSubscription,
 } from '@/lib/db/repositories/businesses'
 import { createInvoice, recordPayment, setInvoiceStatus } from '@/lib/db/repositories/billing'
@@ -58,8 +58,9 @@ export async function setBusinessStatusAction(
 
 export async function saveInternalNotesAction(businessId: string, notes: string): Promise<void> {
   const admin = await requireSuperAdmin()
-  // Admin-only field — the business-facing profile action cannot write this.
-  updateBusiness(businessId, { internal_notes: notes.slice(0, 4000) }, { allowAdminFields: true })
+  // Lives in its own admin-only table; the business-facing profile action has
+  // no path to it at all.
+  setInternalNotes(businessId, notes, admin.id)
   recordAudit({
     actorId: admin.id,
     actorEmail: admin.email,
