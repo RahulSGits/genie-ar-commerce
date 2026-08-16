@@ -538,9 +538,9 @@ export function createProduct(businessId: string, input: ProductInput): string {
       input.dimWidth ?? null, input.dimHeight ?? null, input.dimDepth ?? null,
       input.dimUnit ?? 'cm',
       input.placement ?? 'tabletop', input.scaleMultiplier ?? 1,
-      fromBool(input.arEnabled ?? true), input.ctaLabel ?? null, input.ctaUrl ?? null,
-      input.status ?? 'draft', fromBool(input.isFeatured), fromBool(input.isBestseller),
-      fromBool(input.isAvailable ?? true), input.diet ?? null,
+      param(fromBool(input.arEnabled ?? true)), input.ctaLabel ?? null, input.ctaUrl ?? null,
+      input.status ?? 'draft', param(fromBool(input.isFeatured)), param(fromBool(input.isBestseller)),
+      param(fromBool(input.isAvailable ?? true)), input.diet ?? null,
       toJson(input.tags ?? []), toJson(input.allergens ?? []), ts, ts,
     )
   return id

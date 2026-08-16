@@ -393,7 +393,7 @@ export function upsertPlan(plan: Omit<SubscriptionPlan, 'id'> & { id?: string })
     ).run(
       plan.slug, plan.name, plan.description ?? null, plan.priceMinor, plan.currency,
       plan.billingInterval, plan.setupFeeMinor, toJson(plan.limits), toJson(plan.features),
-      plan.trialDays, fromBool(plan.isPublic), plan.sortOrder, fromBool(plan.archived), ts, id,
+      plan.trialDays, param(fromBool(plan.isPublic)), plan.sortOrder, param(fromBool(plan.archived)), ts, id,
     )
   } else {
     db.prepare(
@@ -404,7 +404,7 @@ export function upsertPlan(plan: Omit<SubscriptionPlan, 'id'> & { id?: string })
     ).run(
       id, plan.slug, plan.name, plan.description ?? null, plan.priceMinor, plan.currency,
       plan.billingInterval, plan.setupFeeMinor, toJson(plan.limits), toJson(plan.features),
-      plan.trialDays, fromBool(plan.isPublic), plan.sortOrder, fromBool(plan.archived), ts, ts,
+      plan.trialDays, param(fromBool(plan.isPublic)), plan.sortOrder, param(fromBool(plan.archived)), ts, ts,
     )
   }
   return id

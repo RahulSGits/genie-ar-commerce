@@ -146,12 +146,31 @@ export function toBool(value: unknown): boolean {
   return value === 1 || value === true || value === '1'
 }
 
-export function fromBool(value: boolean | undefined | null): number {
-  return value ? 1 : 0
+/**
+ * Application-layer booleans stay booleans all the way to the adapter.
+ *
+ * SQLite has no boolean type and wants 0/1; Postgres has one and rejects an
+ * integer for a boolean column. Rather than have call sites know which engine
+ * they are on, `param()` converts booleans to 0/1 for SQLite and the Postgres
+ * driver takes them as-is — so this returns the value unchanged and the
+ * engine-specific coercion happens in exactly one place.
+ */
+export function fromBool(value: boolean | undefined | null): boolean {
+  return value === true
 }
 
-/** Parses a JSON text column, returning `fallback` rather than throwing. */
+/**
+ * Parses a JSON column, returning `fallback` rather than throwing.
+ *
+ * Accepts an already-parsed object as well as text: SQLite stores json as TEXT
+ * and hands back a string, while Postgres `jsonb` is decoded by the driver and
+ * arrives as an object. Rejecting the object form would make every jsonb column
+ * silently read as its fallback on Postgres — empty tag arrays, default plan
+ * limits, no page config — with no error anywhere.
+ */
 export function parseJson<T>(value: unknown, fallback: T): T {
+  if (value === null || value === undefined) return fallback
+  if (typeof value === 'object') return value as T
   if (typeof value !== 'string' || value === '') return fallback
   try {
     return JSON.parse(value) as T
