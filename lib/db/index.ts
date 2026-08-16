@@ -108,6 +108,14 @@ const ADDED_COLUMNS: Record<string, Record<string, string>> = {
     cost_minor: `INTEGER NOT NULL DEFAULT 0`,
     retry_of: `TEXT`,
   },
+  subscriptions: {
+    // The provider's own subscription id, so a webhook can find this row.
+    provider_subscription_id: `TEXT`,
+    provider_price_id: `TEXT`,
+    // Distinct from `cancelled_at`: the customer has asked to leave but is
+    // still entitled to service until the period ends.
+    cancel_at_period_end: `INTEGER NOT NULL DEFAULT 0`,
+  },
   qr_codes: {
     campaign_id: `TEXT`,
     // Appearance is stored so a regenerated PNG matches the printed original.

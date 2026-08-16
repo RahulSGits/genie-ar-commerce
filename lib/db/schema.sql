@@ -863,3 +863,45 @@ CREATE TABLE IF NOT EXISTS integrations (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_integration_unique
   ON integrations (business_id, provider);
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PAYMENT PROVIDER LINKAGE
+
+   Kept in its own table rather than as columns on `subscriptions` because a
+   business has one provider customer that outlives any individual
+   subscription — cancel and resubscribe, and the card on file should still be
+   there. Storing the customer id on the subscription row would lose it.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+CREATE TABLE IF NOT EXISTS payment_customers (
+  business_id          TEXT PRIMARY KEY REFERENCES businesses(id) ON DELETE CASCADE,
+  provider             TEXT NOT NULL,
+  provider_customer_id TEXT NOT NULL,
+  created_at           TEXT NOT NULL,
+  updated_at           TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_pay_customer ON payment_customers (provider_customer_id);
+
+/*
+   Every webhook event we have processed.
+
+   The primary key is the PROVIDER's event id, which is what makes replay
+   handling correct: providers guarantee at-least-once delivery, so the same
+   event arrives twice routinely. Without this table a duplicate
+   `invoice.paid` would record a second payment against the same invoice and
+   the customer's balance would go negative.
+*/
+CREATE TABLE IF NOT EXISTS payment_events (
+  id            TEXT PRIMARY KEY,
+  provider      TEXT NOT NULL,
+  type          TEXT NOT NULL,
+  business_id   TEXT REFERENCES businesses(id) ON DELETE SET NULL,
+  payload       TEXT,          -- json, for support and replay
+  -- received | processed | ignored | failed
+  status        TEXT NOT NULL DEFAULT 'received',
+  error         TEXT,
+  processed_at  TEXT,
+  created_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_pay_events_business ON payment_events (business_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_pay_events_status ON payment_events (status);

@@ -471,7 +471,9 @@ export function updateSubscription(
     limitsOverride?: Partial<PlanLimits> | null
     featuresOverride?: Partial<PlanFeatures> | null
     graceDays?: number
+    currentPeriodStart?: string
     currentPeriodEnd?: string
+    cancelledAt?: string | null
   },
 ): void {
   const sets: string[] = []
@@ -489,8 +491,14 @@ export function updateSubscription(
     sets.push('features_override = ?'); params.push(param(toJson(patch.featuresOverride)))
   }
   if (patch.graceDays !== undefined) { sets.push('grace_days = ?'); params.push(patch.graceDays) }
+  if (patch.currentPeriodStart !== undefined) {
+    sets.push('current_period_start = ?'); params.push(param(patch.currentPeriodStart))
+  }
   if (patch.currentPeriodEnd !== undefined) {
     sets.push('current_period_end = ?'); params.push(param(patch.currentPeriodEnd))
+  }
+  if (patch.cancelledAt !== undefined) {
+    sets.push('cancelled_at = ?'); params.push(param(patch.cancelledAt))
   }
   if (sets.length === 0) return
 
