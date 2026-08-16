@@ -15,7 +15,7 @@ import {
   toggleWebhookAction,
   flushWebhooksAction,
 } from '@/lib/actions/developer'
-import { API_SCOPES, SCOPE_LABELS, type ApiKey } from '@/lib/api/keys'
+import { API_SCOPES, SCOPE_LABELS, type ApiKey } from '@/lib/api/scopes'
 import { WEBHOOK_EVENTS, WEBHOOK_EVENT_LABELS, HIGH_VOLUME_EVENTS } from '@/lib/webhooks/events'
 
 type Endpoint = {

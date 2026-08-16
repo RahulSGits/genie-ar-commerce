@@ -18,44 +18,11 @@ import { getDb, now, uuid, type Row, str, num, parseJson, toJson, param } from '
  * platform's problems.
  */
 
-export type ApiScope =
-  | 'products:read'
-  | 'products:write'
-  | 'generation:run'
-  | 'qr:read'
-  | 'qr:write'
-  | 'analytics:read'
+export type { ApiScope, ApiKey } from '@/lib/api/scopes'
+export { API_SCOPES, SCOPE_LABELS } from '@/lib/api/scopes'
 
-export const API_SCOPES: ApiScope[] = [
-  'products:read',
-  'products:write',
-  'generation:run',
-  'qr:read',
-  'qr:write',
-  'analytics:read',
-]
-
-export const SCOPE_LABELS: Record<ApiScope, string> = {
-  'products:read': 'Read products',
-  'products:write': 'Create and update products',
-  'generation:run': 'Start 3D generation (consumes credits)',
-  'qr:read': 'Read QR codes',
-  'qr:write': 'Create and update QR codes',
-  'analytics:read': 'Read analytics',
-}
-
-export type ApiKey = {
-  id: string
-  businessId: string
-  name: string
-  prefix: string
-  scopes: ApiScope[]
-  lastUsedAt: string | null
-  requestCount: number
-  expiresAt: string | null
-  revokedAt: string | null
-  createdAt: string
-}
+import type { ApiScope, ApiKey } from '@/lib/api/scopes'
+import { API_SCOPES } from '@/lib/api/scopes'
 
 const PREFIX = 'gk_live_'
 

@@ -101,16 +101,17 @@ const FEATURES_OFF = {
   priority_support: false, model_generation: false,
 }
 
-function createPlan(slug, name, priceMinor, setupFeeMinor, limits, features, sortOrder, description) {
+function createPlan(slug, name, priceMinor, setupFeeMinor, limits, features, sortOrder, description, opts = {}) {
   const id = uuid()
   db.prepare(
     `INSERT INTO subscription_plans
        (id, slug, name, description, price_minor, currency, billing_interval, setup_fee_minor,
         limits, features, trial_days, is_public, sort_order, archived, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 'INR', 'monthly', ?, ?, ?, 14, 1, ?, 0, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, 'INR', 'monthly', ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
   ).run(
     id, slug, name, description, priceMinor, setupFeeMinor,
     JSON.stringify(limits), JSON.stringify({ ...FEATURES_OFF, ...features }),
+    opts.trialDays ?? 14, opts.isPublic === false ? 0 : 1,
     sortOrder, now(), now(),
   )
   return id
@@ -118,27 +119,67 @@ function createPlan(slug, name, priceMinor, setupFeeMinor, limits, features, sor
 
 const MB = 1024 * 1024
 
+/**
+ * The plan ladder.
+ *
+ * Anchored at ₹3,999 for Starter, which positions GENIE as a considered
+ * purchase for an established business rather than an impulse subscription —
+ * at that price the buyer expects the 3D assets to be produced for them, which
+ * is what the setup fee covers.
+ *
+ * TWO LIMITS ARE DELIBERATELY NOT UNLIMITED, because the unit economics do not
+ * support it (see lib/costs/ledger.ts for the rates these are drawn against):
+ *
+ *   maxArModels     every generation costs GENIE real provider credits, so an
+ *                   unlimited allowance is an unbounded liability on a fixed
+ *                   monthly price. §66.
+ *   maxMonthlyScans every public scan downloads a multi-megabyte GLB, and
+ *                   bandwidth is the largest cost driver in the platform. An
+ *                   uncapped Starter plan on a viral menu would cost more to
+ *                   serve than it earns.
+ *
+ * Enterprise is bounded rather than infinite for the same reason. It is meant
+ * to be negotiated per deal through `limits_override` on the subscription,
+ * which is what that column exists for — the shared plan is never edited to
+ * accommodate one customer.
+ */
+
 const starterId = createPlan(
-  'starter', 'Starter', 99900, 50000,
-  { maxProducts: 5, maxArModels: 5, maxQrCodes: 5, maxStorageBytes: 100 * MB, maxTeamMembers: 1, maxMonthlyScans: null },
+  'starter', 'Starter', 399900, 299900,
+  { maxProducts: 15, maxArModels: 15, maxQrCodes: 25, maxStorageBytes: 500 * MB, maxTeamMembers: 2, maxMonthlyScans: 25000 },
   {}, 1,
-  'For a single outlet getting started with AR.',
+  'For a single outlet putting its first products into AR.',
 )
 const growthId = createPlan(
-  'growth', 'Growth', 199900, 99900,
-  { maxProducts: 20, maxArModels: 20, maxQrCodes: 20, maxStorageBytes: 500 * MB, maxTeamMembers: 3, maxMonthlyScans: null },
+  'growth', 'Growth', 899900, 499900,
+  { maxProducts: 60, maxArModels: 60, maxQrCodes: 150, maxStorageBytes: 2048 * MB, maxTeamMembers: 6, maxMonthlyScans: 100000 },
   { advanced_analytics: true, custom_branding: true, team_members: true }, 2,
-  'For growing businesses that want the full catalog in AR.',
+  'For growing brands running the full catalogue in AR, with a team.',
 )
-const proId = createPlan(
-  'pro', 'Pro', 399900, 149900,
-  { maxProducts: 50, maxArModels: 50, maxQrCodes: null, maxStorageBytes: 2048 * MB, maxTeamMembers: 10, maxMonthlyScans: null },
+const businessPlanId = createPlan(
+  'business', 'Business', 1999900, 999900,
+  { maxProducts: 250, maxArModels: 250, maxQrCodes: null, maxStorageBytes: 10240 * MB, maxTeamMembers: 20, maxMonthlyScans: 500000 },
+  {
+    advanced_analytics: true, custom_branding: true, team_members: true,
+    white_label: true, custom_domain: true, priority_support: true, api_access: true,
+  }, 3,
+  'For multi-location brands: white-label, custom domain, API access and priority support.',
+)
+const enterpriseId = createPlan(
+  // Priced at zero and NOT public: Enterprise is quoted, not bought. A public
+  // ₹0 plan would appear on the pricing page as free.
+  'enterprise', 'Enterprise', 0, 0,
+  { maxProducts: null, maxArModels: 2000, maxQrCodes: null, maxStorageBytes: 51200 * MB, maxTeamMembers: null, maxMonthlyScans: null },
   {
     advanced_analytics: true, custom_branding: true, team_members: true,
     white_label: true, custom_domain: true, priority_support: true,
-  }, 3,
-  'For multi-outlet brands needing white-label and priority support.',
+    api_access: true, model_generation: true,
+  }, 4,
+  'Custom pricing for chains and groups. Negotiated limits, SLA and onboarding.',
+  { isPublic: false },
 )
+void businessPlanId
+void enterpriseId
 console.log('✓ plans')
 
 /* ── businesses ─────────────────────────────────────────────────────────── */
@@ -203,7 +244,7 @@ function createSubscription(businessId, planId, status, negotiated, ageDays) {
 
 // Urban Bites negotiated ₹1,499 against the ₹1,999 Growth plan — the shared
 // plan is untouched, which is the whole point of negotiated_price_minor.
-const bitesSubId = createSubscription(bitesId, growthId, 'active', 149900, 96)
+const bitesSubId = createSubscription(bitesId, growthId, 'active', 749900, 96)
 const threadsSubId = createSubscription(threadsId, starterId, 'trialing', null, 6)
 console.log('✓ businesses + subscriptions')
 
