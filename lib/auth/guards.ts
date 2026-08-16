@@ -1,8 +1,9 @@
 import 'server-only'
 
 import { redirect } from 'next/navigation'
-import { getDb, type Row, str } from '@/lib/db'
+import { getDb, type Row, str, toBool } from '@/lib/db'
 import { getSessionUser, type SessionUser } from '@/lib/auth/session'
+import { can, normalizeRole, type Permission, type Role } from '@/lib/auth/permissions'
 
 /**
  * Server-side authorization guards.
@@ -13,14 +14,16 @@ import { getSessionUser, type SessionUser } from '@/lib/auth/session'
  * takes the resolved businessId explicitly.
  */
 
-export type BusinessRole = 'owner' | 'admin' | 'member'
+export type BusinessRole = Role
 
 export type BusinessContext = {
   user: SessionUser
   businessId: string
   businessName: string
   businessSlug: string
-  role: BusinessRole
+  role: Role
+  /** Whether this workspace routes edits through an approval step (§50). */
+  requiresApproval: boolean
 }
 
 /** Signed-in user, or redirect to login. */
@@ -58,7 +61,7 @@ export async function requireBusiness(businessId?: string): Promise<BusinessCont
     businessId
       ? db
           .prepare(
-            `SELECT b.id, b.name, b.slug, m.role
+            `SELECT b.id, b.name, b.slug, b.requires_approval, m.role
                FROM business_members m
                JOIN businesses b ON b.id = m.business_id
               WHERE m.user_id = ? AND m.business_id = ? AND b.deleted_at IS NULL`,
@@ -66,7 +69,7 @@ export async function requireBusiness(businessId?: string): Promise<BusinessCont
           .get(user.id, businessId)
       : db
           .prepare(
-            `SELECT b.id, b.name, b.slug, m.role
+            `SELECT b.id, b.name, b.slug, b.requires_approval, m.role
                FROM business_members m
                JOIN businesses b ON b.id = m.business_id
               WHERE m.user_id = ? AND b.deleted_at IS NULL
@@ -83,24 +86,27 @@ export async function requireBusiness(businessId?: string): Promise<BusinessCont
     businessId: str(row, 'id'),
     businessName: str(row, 'name'),
     businessSlug: str(row, 'slug'),
-    role: (str(row, 'role') || 'member') as BusinessRole,
+    role: normalizeRole(str(row, 'role')),
+    requiresApproval: toBool(row['requires_approval']),
   }
 }
 
 /**
- * Same as requireBusiness but additionally demands a minimum role.
- * owner > admin > member.
+ * Same as requireBusiness, but the caller must hold a specific capability.
+ *
+ * Capability rather than role rank: ranking roles on a single axis stops
+ * working the moment two roles are peers with different powers, which is
+ * exactly the case for Manager and Analyst. See lib/auth/permissions.ts.
  */
-export async function requireBusinessRole(
-  minimum: BusinessRole,
+export async function requirePermission(
+  permission: Permission,
   businessId?: string,
 ): Promise<BusinessContext> {
   const ctx = await requireBusiness(businessId)
-  const rank: Record<BusinessRole, number> = { member: 1, admin: 2, owner: 3 }
 
-  if (rank[ctx.role] < rank[minimum]) {
+  if (!can(ctx.role, permission)) {
     const { forbidden } = await import('@/lib/auth/errors')
-    forbidden(`This action requires the ${minimum} role.`)
+    forbidden(`Your role (${ctx.role}) cannot ${permission.replace(':', ' ')}.`)
   }
   return ctx
 }

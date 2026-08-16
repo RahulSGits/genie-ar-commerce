@@ -176,9 +176,28 @@ export default function ModelViewer({
       auto-rotate-delay={2500}
       rotation-per-second="18deg"
       interaction-prompt="auto"
-      shadow-intensity="1"
-      shadow-softness="0.85"
-      exposure="1"
+      // Lighting is most of what makes a model read as a real object.
+      //
+      // `neutral` selects model-viewer's newer built-in environment: a softer,
+      // more physically plausible studio than the default `legacy` rig, whose
+      // hard key light flattens texture detail into glare. Nothing is fetched —
+      // both are generated in the renderer, so this costs no download.
+      environment-image="neutral"
+      // Khronos PBR Neutral. ACES (the usual default elsewhere) is graded for
+      // film and desaturates product colours, which for commerce means the
+      // customer sees a duller version of what they will be served.
+      tone-mapping="neutral"
+      // A contact shadow is what plants an object on a surface. Without one it
+      // floats, and no amount of material work fixes that read.
+      shadow-intensity="1.1"
+      shadow-softness="0.9"
+      exposure="1.05"
+      // Three-quarter view from slightly above: the angle a product is
+      // photographed from, and the one that shows depth rather than a
+      // silhouette. Users can still orbit anywhere from here.
+      camera-orbit="24deg 72deg auto"
+      min-camera-orbit="auto 0deg auto"
+      max-camera-orbit="auto 100deg auto"
       loading="eager"
       style={{ width: '100%', height: '100%', backgroundColor: 'transparent' }}
     />

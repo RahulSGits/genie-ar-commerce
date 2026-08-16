@@ -65,6 +65,10 @@ export type FeatureFlags = {
   custom_domain: boolean
   advanced_analytics: boolean
   pwa: boolean
+  /** Master switch for the public REST API. Off until an operator opts in. */
+  public_api: boolean
+  /** Outbound webhook delivery. Off by default — it makes outbound requests. */
+  webhooks: boolean
 }
 
 /**
@@ -81,6 +85,8 @@ const DEFAULT_FLAGS: FeatureFlags = {
   custom_domain: false,
   advanced_analytics: true,
   pwa: false,
+  public_api: false,
+  webhooks: false,
 }
 
 export function getFeatureFlags(): FeatureFlags {

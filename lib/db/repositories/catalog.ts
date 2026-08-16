@@ -9,9 +9,29 @@ import type { CurrencyCode } from '@/utils/money'
 import type { PlacementMode } from '@/config/terminology'
 import type { LengthUnit } from '@/types/ar'
 import type {
-  DietTag, MenuCategory, ModelStatus, Product, ProductStatus,
-  ProductWithModel, ThreeDModel,
+  ApprovalStatus, DietTag, MenuCategory, ModelStatus, PageBlock, Product,
+  ProductStatus, ProductVariant, ProductWithModel, ThreeDModel,
 } from '@/types/domain'
+import type { QualityReport } from '@/lib/quality/score'
+
+/**
+ * The single definition of "a customer can see this right now".
+ *
+ * Scheduled publishing is evaluated here, in SQL, rather than by a cron job
+ * that flips `status` at the appointed minute. A cron introduces a window
+ * where the database disagrees with the schedule — if it is late, or the
+ * process is not running, a promotion that was meant to end at midnight is
+ * still live at 9am. Deriving visibility on read means the schedule is always
+ * exactly true, and there is no job to forget to deploy.
+ *
+ * Bound parameters: the caller supplies the current ISO timestamp twice.
+ */
+const VISIBLE_NOW = `
+  p.status = 'published'
+  AND p.deleted_at IS NULL
+  AND (p.publish_at IS NULL OR p.publish_at <= ?)
+  AND (p.unpublish_at IS NULL OR p.unpublish_at > ?)
+  AND p.approval_status IN ('none', 'approved')`
 
 /* ── mappers ────────────────────────────────────────────────────────────── */
 
@@ -28,6 +48,14 @@ function mapModel(row: Row): ThreeDModel {
     triangleCount: numOrNull(row, 'triangle_count'),
     status: (str(row, 'status') || 'processing') as ModelStatus,
     errorMessage: strOrNull(row, 'error_message'),
+    version: num(row, 'version', 1),
+    replacesId: strOrNull(row, 'replaces_id'),
+    textureBytes: numOrNull(row, 'texture_bytes'),
+    materialCount: numOrNull(row, 'material_count'),
+    meshCount: numOrNull(row, 'mesh_count'),
+    nodeCount: numOrNull(row, 'node_count'),
+    bbox: parseJson<{ x: number; y: number; z: number } | null>(row.bbox, null),
+    quality: parseJson<QualityReport | null>(row.quality, null),
     createdAt: str(row, 'created_at'),
     updatedAt: str(row, 'updated_at'),
   }
@@ -71,10 +99,20 @@ function mapProduct(row: Row): Product {
     materials: parseJson<string[]>(row.materials, []),
     colors: parseJson<string[]>(row.colors, []),
     sizes: parseJson<string[]>(row.sizes, []),
+    brand: strOrNull(row, 'brand'),
+    publishAt: strOrNull(row, 'publish_at'),
+    unpublishAt: strOrNull(row, 'unpublish_at'),
+    approvalStatus: (str(row, 'approval_status') || 'none') as ApprovalStatus,
+    approvedBy: strOrNull(row, 'approved_by'),
+    approvedAt: strOrNull(row, 'approved_at'),
+    pageConfig: parseJson<PageBlock[] | null>(row.page_config, null),
+    variants: parseJson<ProductVariant[]>(row.variants, []),
     createdAt: str(row, 'created_at'),
     updatedAt: str(row, 'updated_at'),
   }
 }
+
+export { mapProduct, mapModel }
 
 /* ── 3D models ──────────────────────────────────────────────────────────── */
 
@@ -110,20 +148,51 @@ export function createModel(input: {
   format?: string | null
   triangleCount?: number | null
   status?: ModelStatus
+  /** Measured by lib/quality — never supplied by the client. */
+  quality?: QualityReport | null
+  /** Set when this upload supersedes an existing model (§49). */
+  replacesId?: string | null
 }): string {
   const id = uuid()
   const ts = now()
+  const measured = input.quality?.measured
+  const bbox = measured?.size ?? null
+
+  // A replacement continues its predecessor's chain rather than restarting at
+  // 1, so "Version 3" means the third asset this product has ever served.
+  const version = input.replacesId
+    ? num(
+        (getDb()
+          .prepare(`SELECT version FROM three_d_models WHERE id = ? AND business_id = ?`)
+          .get(input.replacesId, input.businessId) as Row) ?? {},
+        'version',
+        0,
+      ) + 1
+    : 1
+
   getDb()
     .prepare(
       `INSERT INTO three_d_models
          (id, business_id, name, glb_url, usdz_url, poster_url, file_size_bytes,
-          format, triangle_count, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          format, triangle_count, status, version, replaces_id, texture_bytes,
+          material_count, mesh_count, bbox, quality, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       id, input.businessId, input.name, input.glbUrl ?? null, input.usdzUrl ?? null,
       input.posterUrl ?? null, input.fileSizeBytes ?? 0, input.format ?? null,
-      input.triangleCount ?? null, input.status ?? 'processing', ts, ts,
+      // The measured triangle count wins over any caller-supplied one: the file
+      // is the authority on what is in the file.
+      measured?.triangleCount ?? input.triangleCount ?? null,
+      input.status ?? 'processing',
+      version,
+      param(input.replacesId ?? null),
+      param(measured?.textureBytes ?? null),
+      param(measured?.materialCount ?? null),
+      param(measured?.meshCount ?? null),
+      param(toJson(bbox)),
+      param(toJson(input.quality ?? null)),
+      ts, ts,
     )
   return id
 }
@@ -156,6 +225,75 @@ export function updateModel(
   getDb()
     .prepare(`UPDATE three_d_models SET ${sets.join(', ')} WHERE id = ? AND business_id = ?`)
     .run(...params)
+}
+
+/**
+ * The full version chain for a model, newest first.
+ *
+ * Walks `replaces_id` in both directions from the given id, so asking about
+ * any version in the chain returns the whole history — a business looking at
+ * v2 wants to see that v3 exists just as much as that v1 does.
+ */
+export function listModelVersions(businessId: string, id: string): ThreeDModel[] {
+  const db = getDb()
+  const chain: ThreeDModel[] = []
+  const seen = new Set<string>()
+
+  // Backwards: this model and everything it replaced.
+  let cursor: string | null = id
+  while (cursor && !seen.has(cursor)) {
+    seen.add(cursor)
+    const row = db
+      .prepare(`SELECT * FROM three_d_models WHERE id = ? AND business_id = ?`)
+      .get(cursor, businessId) as Row | undefined
+    if (!row) break
+    chain.push(mapModel(row))
+    cursor = strOrNull(row, 'replaces_id')
+  }
+
+  // Forwards: everything that replaced this model.
+  cursor = id
+  while (cursor) {
+    const row = db
+      .prepare(`SELECT * FROM three_d_models WHERE replaces_id = ? AND business_id = ?`)
+      .get(cursor, businessId) as Row | undefined
+    if (!row) break
+    const next = str(row, 'id')
+    if (seen.has(next)) break
+    seen.add(next)
+    chain.push(mapModel(row))
+    cursor = next
+  }
+
+  return chain.sort((a, b) => b.version - a.version)
+}
+
+/** Stores a freshly computed quality report against a model. */
+export function saveModelQuality(
+  businessId: string,
+  id: string,
+  quality: QualityReport,
+): void {
+  const m = quality.measured
+  getDb()
+    .prepare(
+      `UPDATE three_d_models
+          SET quality = ?, triangle_count = ?, texture_bytes = ?, material_count = ?,
+              mesh_count = ?, bbox = ?, file_size_bytes = ?, updated_at = ?
+        WHERE id = ? AND business_id = ?`,
+    )
+    .run(
+      toJson(quality),
+      m.triangleCount,
+      m.textureBytes,
+      m.materialCount,
+      m.meshCount,
+      param(toJson(m.size)),
+      m.fileBytes,
+      now(),
+      id,
+      businessId,
+    )
 }
 
 export function deleteModel(businessId: string, id: string): void {
@@ -310,17 +448,17 @@ export function getPublicProduct(
   productSlug: string,
 ): { product: Product; model: ThreeDModel | null } | null {
   const db = getDb()
+  const timestamp = now()
   const row = db
     .prepare(
       `SELECT p.* FROM products p
          JOIN businesses b ON b.id = p.business_id
         WHERE b.slug = ? AND p.slug = ?
-          AND p.status = 'published'
-          AND p.deleted_at IS NULL
+          AND ${VISIBLE_NOW}
           AND b.deleted_at IS NULL
           AND b.status = 'active'`,
     )
-    .get(businessSlug, productSlug) as Row | undefined
+    .get(businessSlug, productSlug, timestamp, timestamp) as Row | undefined
 
   if (!row) return null
   const product = mapProduct(row)
@@ -335,15 +473,16 @@ export function getPublicProduct(
 }
 
 export function listPublicProducts(businessSlug: string): Product[] {
+  const timestamp = now()
   const rows = getDb()
     .prepare(
       `SELECT p.* FROM products p
          JOIN businesses b ON b.id = p.business_id
-        WHERE b.slug = ? AND p.status = 'published' AND p.deleted_at IS NULL
+        WHERE b.slug = ? AND ${VISIBLE_NOW}
           AND b.deleted_at IS NULL AND b.status = 'active'
         ORDER BY p.sort_order ASC, p.created_at DESC`,
     )
-    .all(businessSlug) as Row[]
+    .all(businessSlug, timestamp, timestamp) as Row[]
   return rows.map(mapProduct)
 }
 

@@ -17,6 +17,7 @@ import {
   type SqlParam,
 } from '@/lib/db'
 import type { CurrencyCode } from '@/utils/money'
+import { normalizeRole } from '@/lib/auth/permissions'
 import type { BusinessCategory } from '@/config/terminology'
 import {
   UNLIMITED,
@@ -63,6 +64,10 @@ function mapBusiness(row: Row): Business {
     openingHours: parseJson<Record<string, string> | null>(row.opening_hours, null),
     currency: (str(row, 'currency') || 'INR') as CurrencyCode,
     timezone: str(row, 'timezone') || 'Asia/Kolkata',
+    requiresApproval: toBool(row.requires_approval),
+    showGenieBadge: toBool(row.show_genie_badge),
+    industryTemplate: strOrNull(row, 'industry_template'),
+    conversionGoal: strOrNull(row, 'conversion_goal'),
     status: (str(row, 'status') || 'active') as BusinessStatus,
     createdAt: str(row, 'created_at'),
     updatedAt: str(row, 'updated_at'),
@@ -313,7 +318,7 @@ export function addMember(businessId: string, userId: string, role: BusinessRole
 export function listMembers(businessId: string): BusinessMember[] {
   const rows = getDb()
     .prepare(
-      `SELECT m.*, u.email, u.full_name
+      `SELECT m.*, u.email, u.full_name, u.avatar_url, u.last_login_at
          FROM business_members m
          JOIN users u ON u.id = m.user_id
         WHERE m.business_id = ?
@@ -325,9 +330,11 @@ export function listMembers(businessId: string): BusinessMember[] {
     id: str(r, 'id'),
     businessId: str(r, 'business_id'),
     userId: str(r, 'user_id'),
-    role: (str(r, 'role') || 'member') as BusinessRole,
+    role: normalizeRole(str(r, 'role')),
     email: str(r, 'email'),
     fullName: str(r, 'full_name'),
+    avatarUrl: strOrNull(r, 'avatar_url'),
+    lastLoginAt: strOrNull(r, 'last_login_at'),
     createdAt: str(r, 'created_at'),
   }))
 }

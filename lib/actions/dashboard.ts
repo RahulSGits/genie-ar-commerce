@@ -6,7 +6,7 @@ import { z } from 'zod'
 import { requireBusiness } from '@/lib/auth/guards'
 import {
   createProduct, updateProduct, deleteProduct, productSlugAvailable,
-  createModel, updateModel, deleteModel, createCategory, listModels,
+  createModel, updateModel, deleteModel, createCategory, listModels, getModel,
 } from '@/lib/db/repositories/catalog'
 import {
   createQrCode, updateQrCode, deleteQrCode, regenerateQrToken,
@@ -17,6 +17,8 @@ import {
   canCreateProduct, canCreateArModel, canCreateQrCode, canUploadBytes,
 } from '@/lib/billing/entitlements'
 import { validateModelUpload, safeStorageName, MAX_MODEL_BYTES } from '@/lib/storage/modelValidation'
+import { scoreGlb } from '@/lib/quality/score'
+import { emitWebhook } from '@/lib/webhooks/dispatch'
 import { slugify } from '@/lib/utils'
 import { guarded, fail, type ActionResult } from '@/lib/auth/errors'
 import { PLACEMENT_MODES } from '@/config/terminology'
@@ -214,11 +216,25 @@ export async function uploadModelAction(
     const validation = validateModelUpload(bytes, file.name, file.size)
     if (!validation.ok) throw new Error(validation.error)
 
+    // Scored before anything is written. The report is measured from these
+    // exact bytes, so the number shown next to the model is a property of the
+    // file rather than a claim about it.
+    const quality = scoreGlb(bytes)
+    if (quality.error) throw new Error(quality.error)
+
     const modelId = crypto.randomUUID()
     const safeName = safeStorageName(file.name, modelId)
     const dir = path.join(process.cwd(), 'public', 'uploads', ctx.businessId)
     await mkdir(dir, { recursive: true })
     await writeFile(path.join(dir, safeName), bytes)
+
+    const replacesId = String(formData.get('replacesId') ?? '').trim() || null
+    // Replacing keeps the old row rather than overwriting it, so a published
+    // experience is never destroyed by an upload — the customer-facing page
+    // keeps serving the previous version until the product is repointed.
+    if (replacesId && !getModel(ctx.businessId, replacesId)) {
+      throw new Error('The model being replaced no longer exists.')
+    }
 
     createModel({
       businessId: ctx.businessId,
@@ -228,6 +244,8 @@ export async function uploadModelAction(
       format: validation.format,
       // Validation has already passed, so it is immediately usable.
       status: 'ready',
+      quality,
+      replacesId,
     })
 
     revalidatePath('/dashboard/models')

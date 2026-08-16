@@ -6,6 +6,8 @@ import type {
   SubscriptionStatus,
 } from '@/lib/billing/entitlements'
 import type { LengthUnit } from '@/types/ar'
+import type { QualityReport } from '@/lib/quality/score'
+import type { Role } from '@/lib/auth/permissions'
 
 /* ── identity ───────────────────────────────────────────────────────────── */
 
@@ -19,7 +21,7 @@ export type User = {
   createdAt: string
 }
 
-export type BusinessRole = 'owner' | 'admin' | 'member'
+export type BusinessRole = Role
 
 export type BusinessMember = {
   id: string
@@ -28,6 +30,8 @@ export type BusinessMember = {
   role: BusinessRole
   email: string
   fullName: string
+  avatarUrl: string | null
+  lastLoginAt: string | null
   createdAt: string
 }
 
@@ -64,6 +68,14 @@ export type Business = {
   currency: CurrencyCode
   timezone: string
   status: BusinessStatus
+
+  /** Enterprise publishing gate — an editor's changes wait for an approver. */
+  requiresApproval: boolean
+  /** "Made with GENIE" on public pages. Removable on white-label plans. */
+  showGenieBadge: boolean
+  industryTemplate: string | null
+  /** Which CTA counts as a conversion for this vertical. */
+  conversionGoal: string | null
 
   createdAt: string
   updatedAt: string
@@ -129,6 +141,20 @@ export type ThreeDModel = {
   triangleCount: number | null
   status: ModelStatus
   errorMessage: string | null
+
+  /** Version chain — replacing a model never destroys the published one. */
+  version: number
+  replacesId: string | null
+
+  /** Measured from the file by lib/quality. Null on models predating scoring. */
+  textureBytes: number | null
+  materialCount: number | null
+  meshCount: number | null
+  nodeCount: number | null
+  /** Real-world extent in metres, read from the glTF node hierarchy. */
+  bbox: { x: number; y: number; z: number } | null
+  quality: QualityReport | null
+
   createdAt: string
   updatedAt: string
 }
@@ -146,6 +172,20 @@ export type MenuCategory = {
 
 export type ProductStatus = 'draft' | 'published' | 'archived'
 export type DietTag = 'veg' | 'non-veg' | 'egg'
+
+/** §50. 'none' when the workspace does not require approval. */
+export type ApprovalStatus = 'none' | 'pending' | 'approved' | 'rejected'
+
+/** A colour/size/material option row (§25/§26/§27). */
+export type ProductVariant = {
+  id: string
+  label: string
+  /** colour | size | material — drives how it renders on the public page. */
+  kind: 'colour' | 'size' | 'material'
+  value: string | null
+  priceDeltaMinor: number
+  isAvailable: boolean
+}
 
 export type Product = {
   id: string
@@ -193,8 +233,45 @@ export type Product = {
   colors: string[]
   sizes: string[]
 
+  brand: string | null
+  /** Scheduled publishing (§51). Evaluated on read, never by a cron. */
+  publishAt: string | null
+  unpublishAt: string | null
+  approvalStatus: ApprovalStatus
+  approvedBy: string | null
+  approvedAt: string | null
+  /** Ordered blocks for the public page builder (§22). Null = default layout. */
+  pageConfig: PageBlock[] | null
+  variants: ProductVariant[]
+
   createdAt: string
   updatedAt: string
+}
+
+/* ── public page builder (§22) ──────────────────────────────────────────── */
+
+export const PAGE_BLOCK_KINDS = [
+  'gallery',
+  'model',
+  'ar',
+  'description',
+  'specifications',
+  'price',
+  'variants',
+  'cta',
+  'video',
+  'faq',
+  'social',
+] as const
+
+export type PageBlockKind = (typeof PAGE_BLOCK_KINDS)[number]
+
+export type PageBlock = {
+  id: string
+  kind: PageBlockKind
+  enabled: boolean
+  /** Block-specific settings; shape depends on `kind`. */
+  props?: Record<string, unknown>
 }
 
 /** Product joined with its model, as the dashboard lists need it. */

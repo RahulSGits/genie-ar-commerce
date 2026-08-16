@@ -47,6 +47,84 @@ function migrate(db: DatabaseSync): void {
   // Every statement is CREATE ... IF NOT EXISTS, so this is safe to run on
   // every boot and acts as the migration for a fresh database.
   db.exec(schema)
+  addColumns(db)
+}
+
+/**
+ * Columns added to tables that already exist in a deployed database.
+ *
+ * `CREATE TABLE IF NOT EXISTS` is a no-op once the table is there, so a new
+ * column in schema.sql would never reach an existing install — the app would
+ * typecheck, deploy, and then fail at runtime on the first SELECT. SQLite has
+ * no `ADD COLUMN IF NOT EXISTS`, so the existing columns are read first and
+ * only genuinely missing ones are added.
+ *
+ * Additive only, and every entry must be nullable or carry a DEFAULT: this
+ * runs against databases with rows already in them.
+ */
+const ADDED_COLUMNS: Record<string, Record<string, string>> = {
+  businesses: {
+    // Enterprise publishing control (§50): when on, an editor's changes wait
+    // for an admin rather than going straight to the public page.
+    requires_approval: `INTEGER NOT NULL DEFAULT 0`,
+    // Product-led growth badge on public pages. On by default; removable on
+    // plans whose `white_label` feature is enabled.
+    show_genie_badge: `INTEGER NOT NULL DEFAULT 1`,
+    industry_template: `TEXT`,
+    // Which CTA counts as a conversion for this business (§30).
+    conversion_goal: `TEXT`,
+  },
+  products: {
+    brand: `TEXT`,
+    // Scheduled publishing (§51). Evaluated on read, not by a cron — see
+    // isPubliclyVisible().
+    publish_at: `TEXT`,
+    unpublish_at: `TEXT`,
+    // none | pending | approved | rejected. 'none' when the business does not
+    // require approval, so the common case needs no extra state.
+    approval_status: `TEXT NOT NULL DEFAULT 'none'`,
+    approved_by: `TEXT`,
+    approved_at: `TEXT`,
+    // json: the ordered block list for the public page builder (§22).
+    page_config: `TEXT`,
+    // json: colour/size/material variants (§25).
+    variants: `TEXT`,
+  },
+  three_d_models: {
+    // Version chain (§49). Replacing a model keeps the old row so a published
+    // experience is never destroyed by an upload.
+    version: `INTEGER NOT NULL DEFAULT 1`,
+    replaces_id: `TEXT`,
+    // Measured, not declared — see lib/quality/score.ts.
+    texture_bytes: `INTEGER`,
+    material_count: `INTEGER`,
+    node_count: `INTEGER`,
+    mesh_count: `INTEGER`,
+    bbox: `TEXT`, // json {x,y,z} in metres
+    quality: `TEXT`, // json QualityReport
+  },
+  generation_jobs: {
+    // What this job cost GENIE, mirrored into cost_events.
+    cost_minor: `INTEGER NOT NULL DEFAULT 0`,
+    retry_of: `TEXT`,
+  },
+  qr_codes: {
+    campaign_id: `TEXT`,
+    // Appearance is stored so a regenerated PNG matches the printed original.
+    style: `TEXT`, // json {fg,bg,logo,label,shape}
+  },
+}
+
+function addColumns(db: DatabaseSync): void {
+  for (const [table, columns] of Object.entries(ADDED_COLUMNS)) {
+    const existing = new Set(
+      (db.prepare(`PRAGMA table_info(${table})`).all() as Row[]).map((r) => str(r, 'name')),
+    )
+    for (const [column, definition] of Object.entries(columns)) {
+      if (existing.has(column)) continue
+      db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`)
+    }
+  }
 }
 
 /* ── helpers ────────────────────────────────────────────────────────────── */

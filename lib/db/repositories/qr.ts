@@ -97,6 +97,8 @@ export function createQrCode(input: {
   destination?: QrDestination
   customUrl?: string | null
   campaign?: string | null
+  /** Binds the code to a campaign so its scans attribute there (§21). */
+  campaignId?: string | null
 }): { id: string; token: string } {
   const id = uuid()
   const token = generatePublicToken()
@@ -106,13 +108,14 @@ export function createQrCode(input: {
     .prepare(
       `INSERT INTO qr_codes
          (id, business_id, product_id, token, label, destination, custom_url, campaign,
-          is_active, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+          campaign_id, is_active, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
     )
     .run(
       id, input.businessId, input.productId ?? null, token,
       input.label ?? '', input.destination ?? 'ar',
-      input.customUrl ?? null, input.campaign ?? null, ts, ts,
+      input.customUrl ?? null, input.campaign ?? null,
+      input.campaignId ?? null, ts, ts,
     )
 
   return { id, token }

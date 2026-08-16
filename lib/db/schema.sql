@@ -687,3 +687,179 @@ CREATE TABLE IF NOT EXISTS collection_products (
   PRIMARY KEY (collection_id, product_id)
 );
 CREATE INDEX IF NOT EXISTS idx_cprod_product ON collection_products (product_id);
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   CAMPAIGNS
+
+   A campaign is a dated, named grouping of products with its own QR codes and
+   its own landing page. It exists because "Summer Menu 2026" is how a business
+   actually thinks about a promotion — and because scan analytics are only
+   commercially useful when they can be attributed to the thing being promoted
+   rather than to the whole catalogue.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+CREATE TABLE IF NOT EXISTS campaigns (
+  id            TEXT PRIMARY KEY,
+  business_id   TEXT NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  name          TEXT NOT NULL,
+  slug          TEXT NOT NULL,
+  description   TEXT,
+  cover_url     TEXT,
+  -- Where a campaign QR lands. 'landing' renders the campaign page; 'product'
+  -- jumps straight to a single product's AR page.
+  destination   TEXT NOT NULL DEFAULT 'landing',
+  product_id    TEXT REFERENCES products(id) ON DELETE SET NULL,
+  -- draft | scheduled | active | paused | expired. Derived from the dates on
+  -- read (see resolveCampaignStatus) so a campaign cannot sit "active" past
+  -- its own end date because no job ran.
+  status        TEXT NOT NULL DEFAULT 'draft',
+  starts_at     TEXT,
+  ends_at       TEXT,
+  goal          TEXT,
+  created_at    TEXT NOT NULL,
+  updated_at    TEXT NOT NULL,
+  deleted_at    TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_campaigns_slug
+  ON campaigns (business_id, slug) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_campaigns_business ON campaigns (business_id, status);
+
+CREATE TABLE IF NOT EXISTS campaign_products (
+  campaign_id TEXT NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  product_id  TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  sort_order  INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (campaign_id, product_id)
+);
+CREATE INDEX IF NOT EXISTS idx_camp_prod_product ON campaign_products (product_id);
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PUBLIC API + WEBHOOKS
+
+   Only the SHA-256 of a key is stored. The plaintext is shown exactly once at
+   creation and is unrecoverable afterwards, so a database dump yields nothing
+   usable — the same reasoning as the session tokens.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+CREATE TABLE IF NOT EXISTS api_keys (
+  id           TEXT PRIMARY KEY,
+  business_id  TEXT NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  name         TEXT NOT NULL,
+  -- First 12 chars ("gk_live_ab12"), for identifying a key in a list.
+  prefix       TEXT NOT NULL,
+  token_hash   TEXT NOT NULL UNIQUE,
+  -- json string[] of scopes: products:read, products:write, ...
+  scopes       TEXT NOT NULL DEFAULT '[]',
+  last_used_at TEXT,
+  request_count INTEGER NOT NULL DEFAULT 0,
+  expires_at   TEXT,
+  revoked_at   TEXT,
+  created_by   TEXT REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_api_keys_business ON api_keys (business_id);
+
+CREATE TABLE IF NOT EXISTS webhook_endpoints (
+  id           TEXT PRIMARY KEY,
+  business_id  TEXT NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  url          TEXT NOT NULL,
+  -- Shared secret for the HMAC-SHA256 signature on every delivery.
+  secret       TEXT NOT NULL,
+  -- json string[] of event names, or ["*"].
+  events       TEXT NOT NULL DEFAULT '[]',
+  is_active    INTEGER NOT NULL DEFAULT 1,
+  -- Consecutive failures. An endpoint that keeps failing is disabled rather
+  -- than retried forever against a customer's dead server.
+  failure_count INTEGER NOT NULL DEFAULT 0,
+  last_error   TEXT,
+  last_success_at TEXT,
+  created_at   TEXT NOT NULL,
+  updated_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_webhooks_business ON webhook_endpoints (business_id);
+
+CREATE TABLE IF NOT EXISTS webhook_deliveries (
+  id           TEXT PRIMARY KEY,
+  endpoint_id  TEXT NOT NULL REFERENCES webhook_endpoints(id) ON DELETE CASCADE,
+  business_id  TEXT NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  event        TEXT NOT NULL,
+  payload      TEXT NOT NULL,   -- json
+  -- pending | delivered | failed
+  status       TEXT NOT NULL DEFAULT 'pending',
+  attempts     INTEGER NOT NULL DEFAULT 0,
+  response_status INTEGER,
+  error        TEXT,
+  next_retry_at TEXT,
+  delivered_at TEXT,
+  created_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_deliveries_endpoint ON webhook_deliveries (endpoint_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_deliveries_pending ON webhook_deliveries (status, next_retry_at);
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   RATE LIMITING
+
+   A fixed-window counter keyed by (bucket, window). Kept in the database
+   rather than in memory because Next.js serverless instances do not share
+   memory — an in-process limiter silently multiplies the real limit by the
+   number of running instances.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+CREATE TABLE IF NOT EXISTS rate_limits (
+  bucket       TEXT NOT NULL,
+  window_start INTEGER NOT NULL,
+  count        INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (bucket, window_start)
+);
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   COST LEDGER
+
+   GENIE is itself a SaaS business, so it has to know what a customer costs to
+   serve. Every billable-to-GENIE action appends a row here in the same integer
+   minor units as revenue, which is what makes gross margin a subtraction
+   rather than an estimate.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+CREATE TABLE IF NOT EXISTS cost_events (
+  id           TEXT PRIMARY KEY,
+  business_id  TEXT REFERENCES businesses(id) ON DELETE SET NULL,
+  -- ai_generation | storage | bandwidth | compute | api
+  kind         TEXT NOT NULL,
+  provider     TEXT,
+  -- What was consumed (1 generation, N bytes, N requests).
+  quantity     REAL NOT NULL DEFAULT 0,
+  unit         TEXT NOT NULL DEFAULT 'unit',
+  -- Cost to GENIE, in minor units of `currency`. Never a float.
+  cost_minor   INTEGER NOT NULL DEFAULT 0,
+  currency     TEXT NOT NULL DEFAULT 'INR',
+  reference_id TEXT,
+  metadata     TEXT,   -- json
+  day          TEXT NOT NULL,
+  created_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cost_business ON cost_events (business_id, day);
+CREATE INDEX IF NOT EXISTS idx_cost_kind ON cost_events (kind, day);
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   INTEGRATIONS
+
+   A row exists only once a connection has actually been established. There is
+   deliberately no "available integrations" table seeded with logos — the
+   catalogue is code (lib/integrations/registry.ts), and a card only reads
+   "Connected" when a row here says so.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+CREATE TABLE IF NOT EXISTS integrations (
+  id           TEXT PRIMARY KEY,
+  business_id  TEXT NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  provider     TEXT NOT NULL,
+  -- connected | error | disconnected
+  status       TEXT NOT NULL DEFAULT 'disconnected',
+  config       TEXT,   -- json, non-secret display config only
+  last_sync_at TEXT,
+  last_error   TEXT,
+  created_at   TEXT NOT NULL,
+  updated_at   TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_integration_unique
+  ON integrations (business_id, provider);

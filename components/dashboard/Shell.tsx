@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LogOut, Menu, X } from 'lucide-react'
+import { LogOut, Menu, Search, X } from 'lucide-react'
 import { Button } from '@/components/ui'
 import { cn } from '@/lib/utils'
 import { signOut } from '@/lib/auth/actions'
@@ -33,6 +33,7 @@ export default function Shell({
   homeHref,
   children,
   userEmail,
+  searchAction,
 }: {
   sections: NavSection[]
   brandLabel: string
@@ -41,6 +42,8 @@ export default function Shell({
   homeHref: string
   children: React.ReactNode
   userEmail: string
+  /** When set, renders the cross-entity search box (§53). */
+  searchAction?: string
 }) {
   const [open, setOpen] = useState(false)
   const pathname = usePathname()
@@ -65,6 +68,22 @@ export default function Shell({
           )}
         </span>
       </Link>
+
+      {searchAction && (
+        <form action={searchAction} className="relative px-1">
+          <Search
+            className="text-muted-foreground pointer-events-none absolute top-1/2 left-3.5 size-3.5 -translate-y-1/2"
+            aria-hidden
+          />
+          <input
+            type="search"
+            name="q"
+            placeholder="Search…"
+            aria-label="Search products, campaigns and codes"
+            className="border-input bg-background/60 focus-visible:ring-ring/40 h-9 w-full rounded-lg border pl-9 text-sm outline-none focus-visible:ring-2"
+          />
+        </form>
+      )}
 
       <div className="flex-1 space-y-5 overflow-y-auto">
         {sections.map((section, i) => (

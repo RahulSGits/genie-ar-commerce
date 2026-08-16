@@ -88,6 +88,36 @@ export function getFunnel(businessId: string, days = 30): FunnelCounts {
   return counts
 }
 
+/**
+ * The same funnel, narrowed to one product.
+ *
+ * Not `getFunnel` with a filter argument: the product-scoped query must also
+ * match events whose product_id was cleared when a product was deleted, and
+ * conflating the two would make a deleted product's history silently reappear
+ * in every other product's numbers.
+ */
+export function getProductFunnel(
+  businessId: string,
+  productId: string,
+  days = 30,
+): FunnelCounts {
+  const rows = getDb()
+    .prepare(
+      `SELECT event_type, COUNT(*) AS c
+         FROM analytics_events
+        WHERE business_id = ? AND product_id = ? AND day >= ?
+        GROUP BY event_type`,
+    )
+    .all(businessId, productId, windowStart(days)) as Row[]
+
+  const counts = Object.fromEntries(AR_FUNNEL_EVENTS.map((e) => [e, 0])) as FunnelCounts
+  for (const row of rows) {
+    const key = str(row, 'event_type') as ArFunnelEvent
+    if (key in counts) counts[key] = num(row, 'c')
+  }
+  return counts
+}
+
 export type DailyPoint = { day: string; scans: number; arSessions: number; ctaClicks: number }
 
 /** Dense series — days with no activity appear as zeros so charts don't lie. */

@@ -2,10 +2,10 @@
 
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
-import { writeFile, mkdir } from 'node:fs/promises'
+import { writeFile, mkdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { z } from 'zod'
-import { requireBusiness } from '@/lib/auth/guards'
+import { requireBusiness, requirePermission } from '@/lib/auth/guards'
 import {
   createProduct, productSlugAvailable, updateProduct, createModel, getProduct,
 } from '@/lib/db/repositories/catalog'
@@ -19,6 +19,10 @@ import { canCreateProduct, canUploadBytes } from '@/lib/billing/entitlements'
 import { getFeatureFlags } from '@/lib/db/repositories/platform'
 import { validateImageUpload, safeStorageName, MAX_IMAGE_BYTES } from '@/lib/storage/modelValidation'
 import { getProvider, generationAvailable, GenerationUnavailableError } from '@/lib/ai3d/provider'
+import { startGeneration } from '@/lib/ai3d/start'
+import { scoreGlb } from '@/lib/quality/score'
+import { saveModelQuality } from '@/lib/db/repositories/catalog'
+import { emitWebhook } from '@/lib/webhooks/dispatch'
 import { slugify } from '@/lib/utils'
 import { guarded, type ActionResult } from '@/lib/auth/errors'
 import { PLACEMENT_MODES } from '@/config/terminology'
@@ -180,75 +184,10 @@ export async function startGenerationAction(
   productId: string,
 ): Promise<ActionResult<{ jobId: string }>> {
   return guarded(async () => {
-    const ctx = await requireBusiness()
-
-    const flags = getFeatureFlags()
-    const availability = generationAvailable(flags.model_generation)
-    if (!availability.available) {
-      throw new GenerationUnavailableError(availability.reason ?? 'AI generation is unavailable.')
-    }
-
-    const product = getProduct(ctx.businessId, productId)
-    if (!product) throw new Error('That product no longer exists.')
-
-    const images = listProductImages(ctx.businessId, productId)
-    if (images.length === 0) {
-      throw new Error(
-        'Add at least one product image before generating. Generation reconstructs geometry from photographs — it has nothing to work from otherwise.',
-      )
-    }
-
-    // Providers fetch the images themselves, so they need ABSOLUTE URLs. Stored
-    // paths are relative, and passing those through produced a request the
-    // provider could not resolve.
-    const origin = (process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000').replace(/\/$/, '')
-    const imageUrls = images.map((img) =>
-      img.url.startsWith('http') ? img.url : `${origin}${img.url}`,
-    )
-
-    // Real-world size is a genuine quality input: a provider told the object is
-    // 12 cm across reconstructs differently from one guessing.
-    const targetSizeM = horizontalRadiusM(
-      product.dimWidth && product.dimDepth
-        ? {
-            width: product.dimWidth,
-            height: product.dimHeight ?? product.dimWidth,
-            depth: product.dimDepth,
-            unit: product.dimUnit,
-          }
-        : null,
-    )
-
-    const provider = getProvider()
-    const jobId = createJob({
-      businessId: ctx.businessId,
-      productId,
-      provider: provider.id,
-      imageIds: images.map((i) => i.id),
-    })
-
-    try {
-      const { providerJobId } = await provider.start({
-        imageUrls,
-        productName: product.name,
-        category: product.placement,
-        targetSizeM: targetSizeM === null ? null : targetSizeM * 2,
-      })
-      updateJob(ctx.businessId, jobId, {
-        providerJobId,
-        status: 'running',
-        stage: 'analyzing',
-        startedAt: new Date().toISOString(),
-      })
-    } catch (err) {
-      const message =
-        err instanceof GenerationUnavailableError
-          ? err.message
-          : 'The generation provider rejected the request.'
-      failJob(ctx.businessId, jobId, 'provider_error', message)
-      throw new Error(message)
-    }
-
+    // Editors may run generation; viewers and analysts may not — it spends the
+    // workspace's model allowance and GENIE's own provider credits.
+    const ctx = await requirePermission('generation:run')
+    const { jobId } = await startGeneration(ctx.businessId, productId)
     revalidatePath(`/dashboard/products/${productId}`)
     return { jobId }
   })
@@ -308,6 +247,13 @@ export async function pollGenerationAction(jobId: string): Promise<
         triangleCount: progress.result.triangleCount ?? null,
         status: 'ready',
       })
+
+      // Score the delivered asset against the same checks an uploaded model
+      // faces. A provider's own quality claim is not evidence, and a generated
+      // model that is 40 MB or 200 metres wide has to be caught here rather
+      // than by a customer whose phone gives up mid-scan.
+      await scoreGeneratedModel(ctx.businessId, modelId, progress.result.glbUrl)
+
       updateProduct(ctx.businessId, job.productId, { modelId })
       updateJob(ctx.businessId, jobId, {
         status: 'succeeded',
@@ -315,6 +261,11 @@ export async function pollGenerationAction(jobId: string): Promise<
         progress: 100,
         modelId,
         finishedAt: new Date().toISOString(),
+      })
+      emitWebhook(ctx.businessId, 'generation.completed', {
+        jobId,
+        productId: job.productId,
+        modelId,
       })
       revalidatePath(`/dashboard/products/${job.productId}`)
     } else {
@@ -326,6 +277,13 @@ export async function pollGenerationAction(jobId: string): Promise<
         errorMessage: progress.errorMessage ?? null,
         finishedAt: progress.status === 'failed' ? new Date().toISOString() : null,
       })
+      if (progress.status === 'failed') {
+        emitWebhook(ctx.businessId, 'generation.failed', {
+          jobId,
+          productId: job.productId,
+          error: progress.errorMessage ?? null,
+        })
+      }
     }
 
     return {
@@ -338,10 +296,50 @@ export async function pollGenerationAction(jobId: string): Promise<
 }
 
 export async function publishProductAction(productId: string): Promise<void> {
-  const ctx = await requireBusiness()
-  updateProduct(ctx.businessId, productId, { status: 'published' })
+  // Publishing is the gate an Editor does not hold when the workspace runs an
+  // approval workflow — see submitForApprovalAction in lib/actions/workflow.ts.
+  const ctx = await requirePermission('products:publish')
+  const product = getProduct(ctx.businessId, productId)
+  if (!product) return
+
+  updateProduct(ctx.businessId, productId, {
+    status: 'published',
+    approvalStatus: ctx.requiresApproval ? 'approved' : 'none',
+  })
+  emitWebhook(ctx.businessId, 'product.published', { productId, slug: product.slug })
+
   revalidatePath('/dashboard/products')
   revalidatePath(`/dashboard/products/${productId}`)
+}
+
+/**
+ * Reads a just-generated model back off disk and stores its measured score.
+ *
+ * Deliberately non-fatal: a generation that succeeded must not be marked
+ * failed because scoring could not read the file. The model simply carries no
+ * report, and the UI renders "not scored" rather than inventing a number.
+ */
+async function scoreGeneratedModel(
+  businessId: string,
+  modelId: string,
+  glbUrl: string,
+): Promise<void> {
+  try {
+    let bytes: Uint8Array
+    if (glbUrl.startsWith('http')) {
+      const response = await fetch(glbUrl)
+      if (!response.ok) return
+      bytes = new Uint8Array(await response.arrayBuffer())
+    } else {
+      const file = path.join(process.cwd(), 'public', glbUrl.replace(/^\//, ''))
+      bytes = new Uint8Array(await readFile(file))
+    }
+
+    const report = scoreGlb(bytes)
+    if (!report.error) saveModelQuality(businessId, modelId, report)
+  } catch {
+    // Scoring is diagnostic, never a gate on a completed generation.
+  }
 }
 
 /* ── collections ────────────────────────────────────────────────────────── */
