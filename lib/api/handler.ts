@@ -69,9 +69,13 @@ export function withApiKey<P = Record<string, never>>(
   // Next 15 hands dynamic segments to the second argument as a Promise, so the
   // wrapper has to accept and await it rather than ignore it — otherwise every
   // `[id]` route would have to re-implement auth to get at its own id.
+  //
+  // The context parameter is REQUIRED, not optional: Next's RouteContext type
+  // is checked structurally at build time and an optional second argument fails
+  // it. Routes with no dynamic segment simply receive an empty params promise.
   return async (
     request: NextRequest,
-    context?: { params: Promise<P> },
+    context: { params: Promise<P> },
   ): Promise<NextResponse> => {
     const verified = verifyApiKey(request.headers.get('authorization'))
 

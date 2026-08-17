@@ -2,7 +2,8 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { getPublicProduct, listPublicProducts } from '@/lib/db/repositories/catalog'
-import { getBusinessBySlug } from '@/lib/db/repositories/businesses'
+import { getBusinessBySlug, getEntitlements } from '@/lib/db/repositories/businesses'
+import { getBranding } from '@/lib/db/repositories/platform'
 import { getTerminology } from '@/config/terminology'
 import type { PublicArProduct } from '@/types/ar'
 import PublicProductView from '@/components/public/PublicProductView'
@@ -124,6 +125,14 @@ export default async function PublicArProductPage({
       hasModel: Boolean(p.modelId),
     }))
 
+  const branding = getBranding()
+  // The badge comes off only when the business BOTH has white-label on its
+  // plan and has switched it off. Either alone leaves it on: a plan feature
+  // nobody enabled should not silently change what customers see, and a
+  // preference without the entitlement is not something they bought.
+  const entitlements = getEntitlements(business.id)
+  const showBadge = !(entitlements.features.white_label && !business.showGenieBadge)
+
   return (
     <PublicProductView
       product={publicProduct}
@@ -132,6 +141,8 @@ export default async function PublicArProductPage({
       tags={product.tags}
       others={others}
       showFoodFields={terminology.showFoodFields}
+      platformName={branding.name}
+      showBadge={showBadge}
     />
   )
 }

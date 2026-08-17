@@ -270,5 +270,42 @@
   .scroll-x {
     overflow-x: auto;
     scrollbar-width: thin;
+    /*
+      `position: relative` is not cosmetic here — it is what makes the clipping
+      actually work.
+
+      An `overflow` container only clips descendants it is the containing block
+      for. Anything `position: absolute` inside resolves against the nearest
+      POSITIONED ancestor, so without this it escapes the scroll box entirely
+      and extends the document's scrollable width.
+
+      That is not hypothetical: `<TH className="sr-only">Actions</TH>` on the
+      products table is absolutely positioned by `sr-only`, and it made the
+      whole page pan 267px sideways on a phone — with nothing visible out
+      there, because the element is a screen-reader label one pixel wide.
+    */
+    position: relative;
+  }
+}
+
+@layer base {
+  /*
+    Grid items must be allowed to shrink.
+
+    A grid item's `min-width` defaults to `auto`, meaning it refuses to become
+    narrower than its content's min-content width. One nowrap URL or one badge
+    with a long product name is then enough to push a whole card past the edge
+    of a phone — the card does not overflow visibly, the PAGE does, and the fix
+    at each call site is an easily-forgotten `min-w-0`.
+
+    Overriding it here fixes the class of bug rather than each instance. It is
+    scoped to grid children specifically: flex items have the same default, but
+    this codebase relies on intrinsic flex sizing in places (button rows,
+    badges), and changing that globally would be a real behaviour change rather
+    than a bug fix. Anything that genuinely needs intrinsic width opts back in
+    with `min-w-min` or `w-max`.
+  */
+  :where(.grid) > * {
+    min-width: 0;
   }
 }

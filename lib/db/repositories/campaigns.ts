@@ -16,73 +16,14 @@ import type { Product } from '@/types/domain'
  * scans" is a decision; "the catalogue got 3,000 scans" is a number.
  */
 
-export type CampaignStatus = 'draft' | 'scheduled' | 'active' | 'paused' | 'expired'
+export type { Campaign, CampaignStatus } from '@/lib/campaigns/status'
+export {
+  resolveCampaignStatus,
+  CAMPAIGN_STATUS_LABELS,
+  CAMPAIGN_STATUS_VARIANTS,
+} from '@/lib/campaigns/status'
 
-export type Campaign = {
-  id: string
-  businessId: string
-  name: string
-  slug: string
-  description: string | null
-  coverUrl: string | null
-  destination: 'landing' | 'product'
-  productId: string | null
-  /** Stored intent: draft | paused | live. */
-  storedStatus: string
-  /** What is actually true right now, given the dates. */
-  status: CampaignStatus
-  startsAt: string | null
-  endsAt: string | null
-  goal: string | null
-  productCount: number
-  qrCount: number
-  scans: number
-  createdAt: string
-  updatedAt: string
-}
-
-/**
- * Derives the real status from the stored intent plus the dates.
- *
- * The stored column is the operator's *intent* (`draft`, `live`, `paused`);
- * whether the campaign is live is a function of intent AND the clock. Storing
- * "active" and relying on a job to flip it to "expired" means a campaign whose
- * end date passed while the job was down is still advertising a finished
- * promotion — the same failure the scheduled-publishing predicate avoids.
- *
- * Exported and pure so it is unit-testable without a database.
- */
-export function resolveCampaignStatus(
-  stored: string,
-  startsAt: string | null,
-  endsAt: string | null,
-  at: string = new Date().toISOString(),
-): CampaignStatus {
-  if (stored === 'draft') return 'draft'
-  if (stored === 'paused') return 'paused'
-  if (endsAt && endsAt <= at) return 'expired'
-  if (startsAt && startsAt > at) return 'scheduled'
-  return 'active'
-}
-
-export const CAMPAIGN_STATUS_LABELS: Record<CampaignStatus, string> = {
-  draft: 'Draft',
-  scheduled: 'Scheduled',
-  active: 'Active',
-  paused: 'Paused',
-  expired: 'Ended',
-}
-
-export const CAMPAIGN_STATUS_VARIANTS: Record<
-  CampaignStatus,
-  'default' | 'success' | 'warning' | 'muted' | 'destructive'
-> = {
-  draft: 'muted',
-  scheduled: 'default',
-  active: 'success',
-  paused: 'warning',
-  expired: 'muted',
-}
+import { resolveCampaignStatus, type Campaign } from '@/lib/campaigns/status'
 
 function mapCampaign(row: Row, at: string): Campaign {
   const stored = str(row, 'status') || 'draft'

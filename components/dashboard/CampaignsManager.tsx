@@ -16,7 +16,7 @@ import {
   CAMPAIGN_STATUS_LABELS,
   CAMPAIGN_STATUS_VARIANTS,
   type Campaign,
-} from '@/lib/db/repositories/campaigns'
+} from '@/lib/campaigns/status'
 
 /**
  * Campaign list and creation (§21, §31).

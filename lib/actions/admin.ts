@@ -696,7 +696,7 @@ export async function saveBrandingAction(
   return guarded(async () => {
     const admin = await requireSuperAdmin()
     setSetting('branding', {
-      name: String(formData.get('name') ?? 'ARView Commerce').trim(),
+      name: String(formData.get('name') ?? 'GENIE').trim(),
       tagline: String(formData.get('tagline') ?? '').trim(),
       logoUrl: String(formData.get('logoUrl') ?? '') || null,
       faviconEmoji: String(formData.get('faviconEmoji') ?? '📦').slice(0, 4),

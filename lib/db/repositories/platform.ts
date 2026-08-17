@@ -42,12 +42,12 @@ export type Branding = {
 }
 
 const DEFAULT_BRANDING: Branding = {
-  name: 'ARView Commerce',
+  name: 'GENIE',
   tagline: 'Turn your products into interactive AR experiences',
   logoUrl: null,
   faviconEmoji: '📦',
   primaryColor: '#5b3df5',
-  supportEmail: 'support@arview.local',
+  supportEmail: 'support@genie.local',
   supportPhone: '',
 }
 

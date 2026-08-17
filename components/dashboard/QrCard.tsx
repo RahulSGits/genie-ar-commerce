@@ -129,10 +129,25 @@ export default function QrCard({
               />
             </div>
 
-            <div className="flex flex-wrap items-center gap-1.5">
+            {/*
+              Badges are whitespace-nowrap, so a long product or campaign name
+              cannot shrink and pushes the whole card past the viewport on a
+              narrow phone — flex-wrap moves a badge to the next line but never
+              makes one narrower than its text. `max-w-full truncate` lets the
+              badge itself give way instead.
+            */}
+            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
               <Badge variant="secondary">{DESTINATION_LABELS[code.destination]}</Badge>
-              {product && <Badge variant="outline">{product.name}</Badge>}
-              {code.campaign && <Badge variant="muted">{code.campaign}</Badge>}
+              {product && (
+                <Badge variant="outline" className="max-w-full truncate">
+                  {product.name}
+                </Badge>
+              )}
+              {code.campaign && (
+                <Badge variant="muted" className="max-w-full truncate">
+                  {code.campaign}
+                </Badge>
+              )}
               {!active && <Badge variant="warning">Paused</Badge>}
             </div>
 

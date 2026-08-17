@@ -28,6 +28,14 @@ type Props = {
   tags: string[]
   others: Sibling[]
   showFoodFields: boolean
+  /** Platform name, from CMS branding — never hardcoded. */
+  platformName: string
+  /**
+   * Product-led growth badge (§85). Off when the business is on a plan with
+   * white-label and has chosen to remove it — a paying customer's page should
+   * not advertise their supplier against their wishes.
+   */
+  showBadge: boolean
 }
 
 /**
@@ -43,6 +51,8 @@ export default function PublicProductView({
   tags,
   others,
   showFoodFields,
+  platformName,
+  showBadge,
 }: Props) {
   const searchParams = useSearchParams()
   const qrCodeId = searchParams.get('qr')
@@ -217,9 +227,26 @@ export default function PublicProductView({
         </section>
       )}
 
-      <p className="text-muted-foreground/70 mt-8 text-center text-[11px]">
-        3D experience by ARView Commerce · nothing from your camera leaves your device
-      </p>
+      <div className="text-muted-foreground/70 mt-8 space-y-1 text-center text-[11px]">
+        {/*
+          The privacy line is a statement of fact about how AR works here, not
+          marketing: WebXR and Quick Look both composite on-device, and no frame
+          is ever uploaded. Customers hesitate before granting camera access,
+          and saying so plainly is what gets the permission granted.
+        */}
+        <p>Nothing from your camera leaves your device.</p>
+        {showBadge && (
+          <p>
+            3D &amp; AR by{' '}
+            <a
+              href="/?utm_source=ar_page"
+              className="hover:text-foreground underline underline-offset-2"
+            >
+              {platformName}
+            </a>
+          </p>
+        )}
+      </div>
 
       {/* ── sticky CTA ──────────────────────────────────────────────────── */}
       {product.ctaUrl && (

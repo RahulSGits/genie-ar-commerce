@@ -16,7 +16,7 @@
 
 import { DatabaseSync } from 'node:sqlite'
 import { randomUUID, randomBytes, scryptSync, createHash } from 'node:crypto'
-import { mkdirSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, existsSync, readFileSync, writeFileSync, statSync } from 'node:fs'
 import path from 'node:path'
 
 const DB_PATH = process.env.DATABASE_PATH ?? path.join(process.cwd(), 'data', 'arview.db')
@@ -257,11 +257,23 @@ function createModel(businessId, name, file, sizeKb, tris) {
   if (!existsSync(p)) {
     console.warn(`  ! ${file} missing — run: node scripts/generate-demo-models.mjs`)
   }
+
+  // The poster is rendered alongside the GLB by generate-demo-models. It is
+  // what model-viewer paints while a multi-megabyte model streams in, and what
+  // fills the catalogue grid and the Open Graph card — without it a QR scan on
+  // mobile data is several seconds of empty box.
+  const posterFile = file.replace(/\.glb$/, '.png')
+  const posterPath = path.join(process.cwd(), 'public', 'posters', posterFile)
+  const poster = existsSync(posterPath) ? `/posters/${posterFile}` : null
+
+  const bytes = existsSync(p) ? statSync(p).size : sizeKb * 1024
+
   db.prepare(
     `INSERT INTO three_d_models
-       (id, business_id, name, glb_url, file_size_bytes, format, triangle_count, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 'glb', ?, 'ready', ?, ?)`,
-  ).run(id, businessId, name, glb, sizeKb * 1024, tris, now(), now())
+       (id, business_id, name, glb_url, poster_url, file_size_bytes, format, triangle_count,
+        status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, 'glb', ?, 'ready', ?, ?)`,
+  ).run(id, businessId, name, glb, poster, bytes, tris, now(), now())
   return id
 }
 
@@ -288,20 +300,31 @@ const catDrinks = createCategory(bitesId, 'Drinks', 'drinks', 2)
 const catFootwear = createCategory(threadsId, 'Footwear', 'footwear', 0)
 const catHome = createCategory(threadsId, 'Home', 'home', 1)
 
+/** The poster already stored against a model, for reuse as the product image. */
+function modelPoster(modelId) {
+  if (!modelId) return null
+  const row = db.prepare(`SELECT poster_url FROM three_d_models WHERE id = ?`).get(modelId)
+  return row?.poster_url ?? null
+}
+
 function createProduct(businessId, p) {
   const id = uuid()
   db.prepare(
     `INSERT INTO products
        (id, business_id, category_id, model_id, name, slug, description, short_description,
-        price_minor, compare_at_minor, currency,
+        price_minor, compare_at_minor, currency, image_url, thumbnail_url,
         dim_width, dim_height, dim_depth, dim_unit,
         placement, scale_multiplier, ar_enabled, cta_label, cta_url,
         status, is_featured, is_bestseller, is_available, sort_order, diet, tags, allergens,
         created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'INR', ?, ?, ?, 'cm', ?, 1, 1, ?, ?, 'published', ?, ?, 1, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'INR', ?, ?, ?, ?, ?, 'cm', ?, 1, 1, ?, ?, 'published', ?, ?, 1, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id, businessId, p.categoryId, p.modelId, p.name, p.slug, p.description, p.short,
     p.price, p.compareAt ?? null,
+    // The rendered poster doubles as the product image. These are demo
+    // products with no photography, and a real render beats an empty grey box
+    // in the catalogue and in every shared link's preview card.
+    modelPoster(p.modelId), modelPoster(p.modelId),
     p.w, p.h, p.d, p.placement,
     p.ctaLabel, p.ctaUrl,
     p.featured ? 1 : 0, p.bestseller ? 1 : 0, p.sortOrder,

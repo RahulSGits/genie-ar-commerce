@@ -27,7 +27,8 @@
 import * as THREE from 'three'
 import { writeFileSync, mkdirSync } from 'node:fs'
 import path from 'node:path'
-import { installCanvasShim } from './lib/canvas-shim.mjs'
+import { installCanvasShim, encodePng } from './lib/canvas-shim.mjs'
+import { render, downsample } from './lib/raster.mjs'
 import {
   around,
   buildColorTexture,
@@ -49,6 +50,20 @@ const { GLTFExporter } = await import('three/examples/jsm/exporters/GLTFExporter
 
 const OUT_DIR = path.join(process.cwd(), 'public', 'models')
 mkdirSync(OUT_DIR, { recursive: true })
+
+const POSTER_DIR = path.join(process.cwd(), 'public', 'posters')
+mkdirSync(POSTER_DIR, { recursive: true })
+
+/**
+ * Posters are rendered at 2x and downsampled.
+ *
+ * A poster is what model-viewer shows while a multi-megabyte GLB streams in,
+ * what fills the catalogue grid, and what a shared link previews as. Rendering
+ * one costs a few seconds here and saves every customer several seconds of
+ * blank box on mobile data.
+ */
+const POSTER_SIZE = 640
+const SUPERSAMPLE = 2
 
 /** Deterministic RNG so regenerating produces byte-identical models. */
 function rng(seed) {
@@ -660,6 +675,18 @@ for (const { file, build } of MODELS) {
 
   const out = path.join(OUT_DIR, file)
   writeFileSync(out, Buffer.from(buffer))
+
+  const big = render(model, {
+    width: POSTER_SIZE * SUPERSAMPLE,
+    height: POSTER_SIZE * SUPERSAMPLE,
+    // Matches the --card token the public page paints behind the viewer, so
+    // the poster and the live model sit on the same ground with no flash of a
+    // different colour at the handover.
+    background: [250, 250, 251],
+  })
+  const small = downsample(big.pixels, big.width, big.height, SUPERSAMPLE)
+  const posterName = file.replace(/\.glb$/, '.png')
+  writeFileSync(path.join(POSTER_DIR, posterName), encodePng(small.pixels, small.width, small.height))
 
   // Report the authored bounding box so scale mistakes are visible immediately.
   const box = new THREE.Box3().setFromObject(model)
